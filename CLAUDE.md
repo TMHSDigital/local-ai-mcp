@@ -25,7 +25,7 @@ Local AI MCP -- Unified MCP server for managing local model runtimes (Ollama, LM
 ## Conventions
 
 - Use conventional commits (`feat:`, `fix:`, `chore:`, `docs:`)
-- Never manually edit the version in `package.json` -- CI auto-bumps it
+- Bump the version in `package.json` in your PR (`npm version`, keeps the lockfile in sync); `release.yml` tags and publishes that version on merge
 - Provider adapters live in `src/providers/` and implement the `Provider` interface, wired into `ProviderManager`; tools live in `src/tools/`
 - Keep `mcp-tools.json` in sync with the registered tools
 
