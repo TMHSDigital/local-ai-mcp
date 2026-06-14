@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: release
@@ -17,13 +18,13 @@ jobs:
     name: Tag and release
     runs-on: ubuntu-latest
     steps:
+      # Default GITHUB_TOKEN (contents: write) can push tags and create the
+      # release. main is protected and is never written to by CI; the version
+      # is bumped in the PR. Because a GITHUB_TOKEN release does not trigger
+      # publish.yml, this job dispatches publish.yml explicitly after releasing.
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          # A PAT lets the created release trigger publish.yml. A GITHUB_TOKEN
-          # release does NOT trigger downstream workflows by design. Falls back
-          # to GITHUB_TOKEN (then publish.yml can be run via workflow_dispatch).
-          token: ${{ secrets.RELEASE_PAT != '' && secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Read version from package.json
         id: ver
@@ -42,18 +43,16 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Tag and create release
+      - name: Tag, release, and trigger publish
         if: steps.check.outputs.skip == 'false'
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PAT != '' && secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           v="${{ steps.ver.outputs.version }}"
           IFS='.' read -r major minor _patch <<< "$v"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Only tags are pushed (refs/tags/*); main is protected and is never
-          # written to from CI. The version is bumped in the PR, not here.
           git tag "v$v"
           git tag -f "v$major"
           git tag -f "v$major.$minor"
@@ -61,3 +60,7 @@ jobs:
           git push origin "v$major" --force
           git push origin "v$major.$minor" --force
           gh release create "v$v" --title "v$v" --generate-notes
+          # A GITHUB_TOKEN release does not trigger publish.yml, so trigger it
+          # explicitly. publish.yml is idempotent (skips an already-published
+          # version), so a duplicate trigger is harmless.
+          gh workflow run publish.yml --ref main
