@@ -47,7 +47,7 @@ Each runtime is implemented as an adapter behind a single `Provider` interface (
 | Tool | Description |
 |------|-------------|
 | `pull_model` | Download a model. **Heavy: may transfer multiple GB.** |
-| `remove_model` | Delete a model from disk. **Destructive: requires `confirm: true` and refuses without it.** |
+| `remove_model` | Delete a model from disk. **Destructive: requires `confirm: true` and a `provider` (no fan-out); refuses without `confirm: true`.** |
 | `load_model` | Load a model into memory (Ollama `keep_alive`; LM Studio `lms load`). |
 | `unload_model` | Evict a model from memory. |
 
@@ -106,6 +106,7 @@ All configuration is via environment variables with sane defaults:
 | `LMSTUDIO_HOST` | `http://localhost:1234` | LM Studio base URL. |
 | `LOCAL_AI_REQUEST_TIMEOUT_MS` | `120000` | Timeout for normal requests (inference, pull progress, etc.). |
 | `LOCAL_AI_DETECT_TIMEOUT_MS` | `1500` | Timeout for provider auto-detection probes. |
+| `LOCAL_AI_PULL_TIMEOUT_MS` | `3600000` | Timeout for model pulls (multi-GB downloads); set `0` to disable. |
 
 ## Development
 

@@ -1,13 +1,7 @@
-__pycache__/
-*.pyc
-*.pyo
-.env
-.venv/
-venv/
-*.egg-info/
+node_modules/
 dist/
 build/
+.env
 .DS_Store
 Thumbs.db
-node_modules/
 *.log

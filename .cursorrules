@@ -10,6 +10,6 @@ This is a mcp-server repository for Local AI MCP development.
 ## Conventions
 
 - Use conventional commits (feat:, fix:, chore:, docs:)
-- Never manually edit the version -- CI handles it
-- Skills need YAML frontmatter: title, description, globs
-- Rules need frontmatter: description, globs, alwaysApply
+- Never manually edit the version -- CI auto-bumps package.json
+- Keep mcp-tools.json in sync with the registered tools
+- Provider adapters live in src/providers/; tools live in src/tools/

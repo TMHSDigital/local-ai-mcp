@@ -7,8 +7,8 @@
     "github": "https://github.com/TMHSDigital/local-ai-mcp"
   },
   "installSteps": [
-    "Open Cursor IDE and go to <code>Settings</code> > <code>Extensions</code>",
-    "Search for <code>Local AI MCP</code>",
-    "Click <code>Install</code> and reload"
+    "Install with <code>npx -y @tmhs/local-ai-mcp</code>",
+    "Add to your Claude Desktop or Cursor mcpServers config",
+    "Restart your MCP client"
   ]
 }
