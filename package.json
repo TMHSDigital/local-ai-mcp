@@ -1,0 +1,21 @@
+{
+  "name": "@tmhsdigital/local-ai-mcp",
+  "version": "0.1.0",
+  "description": "Unified MCP server for managing local model runtimes (Ollama, LM Studio, and more): provider-agnostic discovery, lifecycle, hardware-fit, and delegated inference.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {"local-ai-mcp": "dist/index.js"},
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "echo 'No build target yet'",
+    "test": "echo 'No tests yet' && exit 0",
+    "prepublishOnly": "npm run build"
+  },
+  "author": "TMHSDigital",
+  "license": "CC-BY-NC-ND-4.0",
+  "repository": {"type": "git", "url": "git+https://github.com/TMHSDigital/local-ai-mcp.git"},
+  "homepage": "https://github.com/TMHSDigital/local-ai-mcp#readme",
+  "bugs": {"url": "https://github.com/TMHSDigital/local-ai-mcp/issues"},
+  "keywords": ["mcp", "model-context-protocol", "developer-tools"],
+  "engines": {"node": ">=20.0.0"}
+}
