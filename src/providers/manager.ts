@@ -1,0 +1,41 @@
+import type { Config } from "../config.js";
+import { LMStudioProvider } from "./lmstudio.js";
+import { OllamaProvider } from "./ollama.js";
+import type { Provider, ProviderId } from "./types.js";
+
+export class ProviderManager {
+  readonly providers: Provider[];
+
+  constructor(config: Config) {
+    this.providers = [
+      new OllamaProvider(config.ollamaHost),
+      new LMStudioProvider(config.lmstudioHost),
+    ];
+  }
+
+  get(id: string): Provider | undefined {
+    return this.providers.find((p) => p.id === (id as ProviderId));
+  }
+
+  async detected(timeoutMs: number): Promise<Provider[]> {
+    const results = await Promise.all(
+      this.providers.map(async (p) => ({ provider: p, live: await p.detect(timeoutMs) })),
+    );
+    return results.filter((r) => r.live).map((r) => r.provider);
+  }
+
+  async resolve(providerArg: string | undefined, timeoutMs: number): Promise<Provider[]> {
+    if (providerArg) {
+      const p = this.get(providerArg);
+      if (!p) {
+        throw new Error(
+          `Unknown provider: ${providerArg}. Known providers: ${this.providers
+            .map((x) => x.id)
+            .join(", ")}`,
+        );
+      }
+      return [p];
+    }
+    return this.detected(timeoutMs);
+  }
+}

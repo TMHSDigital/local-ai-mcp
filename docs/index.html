@@ -4,16 +4,86 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Local AI MCP</title>
+  <meta name="description" content="Unified MCP server for managing local model runtimes (Ollama, LM Studio): provider-agnostic discovery, lifecycle, hardware-fit, and delegated inference.">
   <style>
-    body { font-family: system-ui, sans-serif; background: #0d1117; color: #e6edf3; margin: 0; padding: 2rem; }
-    h1 { color: #7c3aed; }
-    a { color: #a78bfa; }
+    :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --accent: #7c3aed; --accent2: #a78bfa; --card: #161b22; --border: #30363d; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); margin: 0; line-height: 1.6; }
+    .wrap { max-width: 880px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
+    h1 { color: var(--accent2); font-size: 2.2rem; margin: 0 0 .25rem; }
+    .tag { color: var(--muted); font-size: 1.05rem; margin: 0 0 1.5rem; }
+    h2 { color: var(--accent2); margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: .4rem; }
+    a { color: var(--accent2); }
+    code, pre { background: var(--card); border: 1px solid var(--border); border-radius: 6px; font-family: "JetBrains Mono", ui-monospace, monospace; }
+    code { padding: .1rem .35rem; font-size: .9em; }
+    pre { padding: 1rem; overflow-x: auto; }
+    .badges img { margin-right: .4rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: .75rem; margin-top: 1rem; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: .85rem 1rem; }
+    .card h3 { margin: 0 0 .3rem; font-size: .95rem; color: var(--accent2); font-family: "JetBrains Mono", monospace; }
+    .card p { margin: 0; color: var(--muted); font-size: .85rem; }
+    .pill { display: inline-block; font-size: .7rem; padding: .1rem .45rem; border-radius: 999px; margin-left: .3rem; vertical-align: middle; }
+    .pill.danger { background: #3d1418; color: #ff7b72; }
+    .pill.heavy { background: #3d2a14; color: #e3b341; }
+    table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+    th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--border); font-size: .9rem; }
+    th { color: var(--accent2); }
+    footer { margin-top: 3rem; color: var(--muted); font-size: .85rem; border-top: 1px solid var(--border); padding-top: 1rem; }
   </style>
 </head>
 <body>
-  <h1>Local AI MCP</h1>
-  <p>Unified MCP server for managing local model runtimes (Ollama, LM Studio, and more): provider-agnostic discovery, lifecycle, hardware-fit, and delegated inference.</p>
-  <p>Full documentation will be available here once the server implementation is complete.</p>
-  <p><a href="https://github.com/TMHSDigital/local-ai-mcp">View on GitHub</a></p>
+  <div class="wrap">
+    <h1>Local AI MCP</h1>
+    <p class="tag">Unified MCP server for managing local model runtimes (Ollama, LM Studio, and more): provider-agnostic discovery, lifecycle, hardware-fit, and delegated inference.</p>
+    <p class="badges">
+      <img src="https://img.shields.io/badge/license-CC--BY--NC--ND--4.0-green" alt="License">
+      <img src="https://img.shields.io/npm/v/@tmhs/local-ai-mcp?color=7c3aed" alt="npm">
+      <img src="https://img.shields.io/badge/transport-stdio-7c3aed" alt="stdio">
+    </p>
+
+    <h2>What it is</h2>
+    <p>An operations-first control plane for the models on your own machine. It discovers, inspects, fits, and manages local runtimes over their local HTTP APIs, exposing one consistent tool surface across them. It runs over <strong>stdio only</strong> and is a client to your runtimes &mdash; it never opens a network listener of its own.</p>
+
+    <h2>Inference is delegation, not chat</h2>
+    <p>The <code>complete</code> and <code>embed</code> tools <strong>delegate (offload) inference to a local model</strong> for cost control and privacy &mdash; keeping tokens and data on your hardware instead of a hosted API. They are inference primitives, not a conversational chat surface.</p>
+
+    <h2>Provider-adapter model</h2>
+    <p>Each runtime is an adapter behind a single <code>Provider</code> interface. Every tool takes an optional <code>provider</code> argument; omit it and the tool operates across all detected runtimes.</p>
+    <table>
+      <tr><th>Adapter</th><th>Default host</th><th>Notes</th></tr>
+      <tr><td>Ollama</td><td><code>http://localhost:11434</code></td><td>Native REST + OpenAI-compatible <code>/v1</code>; load/unload via <code>keep_alive</code>.</td></tr>
+      <tr><td>LM Studio</td><td><code>http://localhost:1234</code></td><td>REST <code>/api/v0</code> + OpenAI-compatible; <code>lms</code> CLI for load/unload/pull when present.</td></tr>
+    </table>
+
+    <h2>Tools (16)</h2>
+    <div class="grid">
+      <div class="card"><h3>list_providers</h3><p>Runtimes, host, live status, capabilities.</p></div>
+      <div class="card"><h3>list_models</h3><p>Installed models across providers.</p></div>
+      <div class="card"><h3>list_loaded</h3><p>Models resident in memory.</p></div>
+      <div class="card"><h3>model_info</h3><p>Detailed model metadata.</p></div>
+      <div class="card"><h3>pull_model <span class="pill heavy">heavy</span></h3><p>Download a model (multiple GB).</p></div>
+      <div class="card"><h3>remove_model <span class="pill danger">destructive</span></h3><p>Delete a model; requires confirm.</p></div>
+      <div class="card"><h3>load_model</h3><p>Load a model into memory.</p></div>
+      <div class="card"><h3>unload_model</h3><p>Evict a model from memory.</p></div>
+      <div class="card"><h3>health_check</h3><p>Liveness and version per provider.</p></div>
+      <div class="card"><h3>system_resources</h3><p>RAM, CPU, and GPU/VRAM.</p></div>
+      <div class="card"><h3>fit_check</h3><p>Does a model fit in VRAM or RAM?</p></div>
+      <div class="card"><h3>benchmark <span class="pill heavy">heavy</span></h3><p>Latency and tokens/sec.</p></div>
+      <div class="card"><h3>search_available</h3><p>Search a curated model catalog.</p></div>
+      <div class="card"><h3>suggest_model</h3><p>Recommend by task and hardware fit.</p></div>
+      <div class="card"><h3>complete</h3><p>Delegate a completion (offload).</p></div>
+      <div class="card"><h3>embed</h3><p>Delegate embedding generation.</p></div>
+    </div>
+
+    <h2>Install</h2>
+    <pre><code>npx @tmhs/local-ai-mcp</code></pre>
+    <p>Configure via <code>OLLAMA_HOST</code>, <code>LMSTUDIO_HOST</code>, <code>LOCAL_AI_REQUEST_TIMEOUT_MS</code>, and <code>LOCAL_AI_DETECT_TIMEOUT_MS</code>.</p>
+
+    <footer>
+      <a href="https://github.com/TMHSDigital/local-ai-mcp">View on GitHub</a>
+      &nbsp;&middot;&nbsp; Part of the <a href="https://tmhsdigital.github.io/Developer-Tools-Directory/">TMHSDigital Developer Tools Directory</a>
+      &nbsp;&middot;&nbsp; Built by TMHSDigital
+    </footer>
+  </div>
 </body>
 </html>
