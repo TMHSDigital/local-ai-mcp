@@ -58,15 +58,15 @@
   },
   {
     "name": "remove_model",
-    "description": "DESTRUCTIVE: Permanently delete a model from a provider. Requires confirm:true; without it the action is refused. Without a provider arg, removes from every detected provider.",
+    "description": "DESTRUCTIVE: Permanently delete a model from a provider. Requires confirm:true; without it the action is refused. The provider argument is required so a delete cannot fan out across every detected runtime.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "model": { "type": "string", "description": "Model id/name to remove" },
         "confirm": { "type": "boolean", "description": "Must be true to perform this destructive deletion" },
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio"], "description": "Optional provider id" }
+        "provider": { "type": "string", "enum": ["ollama", "lmstudio"], "description": "Required provider id (delete is scoped to a single provider)" }
       },
-      "required": ["model", "confirm"]
+      "required": ["model", "confirm", "provider"]
     }
   },
   {

@@ -8,19 +8,20 @@
 
 ### v0.1.x -- Foundation
 
-- [ ] Initial skills and rules
+- [x] Core provider adapters
+- [x] Initial tool surface
+- [x] stdio transport
 - [ ] CI/CD workflows
 - [ ] GitHub Pages documentation site
-- [ ] AGENTS.md and .cursorrules
 
-### v0.2.0 -- Content Expansion
+### v0.2.0 -- Expansion
 
-- [ ] Additional skills
-- [ ] Additional rules
-- [ ] Comprehensive documentation
+- [ ] Additional provider adapters
+- [ ] Richer tooling
+- [ ] Streaming support
 
 ### v1.0.0 -- Stable Release
 
+- [ ] Broader provider coverage
 - [ ] Full test coverage
-- [ ] Marketplace listing
 - [ ] Complete documentation

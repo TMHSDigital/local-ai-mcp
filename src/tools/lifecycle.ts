@@ -17,7 +17,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
       try {
         const providers = await manager.resolve(provider, config.detectTimeoutMs);
         const byProvider = await aggregate(providers, (p) =>
-          p.pull(model, config.requestTimeoutMs),
+          p.pull(model, config.pullTimeoutMs),
         );
         return ok({ pull: byProvider });
       } catch (err) {
@@ -28,11 +28,13 @@ export function register(server: McpServer, ctx: ToolContext): void {
 
   server.tool(
     "remove_model",
-    "DESTRUCTIVE: Permanently delete a model from a provider. Requires confirm:true; without it the action is refused. Without a provider arg, removes from every detected provider.",
+    "DESTRUCTIVE: Permanently delete a model from a provider. Requires confirm:true; without it the action is refused. The provider argument is REQUIRED so a delete cannot fan out across every detected runtime.",
     {
       model: z.string().describe("Model id/name to remove"),
       confirm: z.boolean().describe("Must be true to perform this destructive deletion"),
-      provider: z.enum(["ollama", "lmstudio"]).optional().describe("Optional provider id"),
+      provider: z
+        .enum(["ollama", "lmstudio"])
+        .describe("Required provider id (delete is scoped to a single provider)"),
     },
     async ({ model, confirm, provider }) => {
       try {

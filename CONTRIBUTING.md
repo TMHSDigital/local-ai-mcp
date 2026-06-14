@@ -15,27 +15,28 @@ Thank you for your interest in contributing.
 
 Use [Conventional Commits](https://www.conventionalcommits.org/):
 
-- `feat:` -- new feature, skill, rule, or MCP tool
+- `feat:` -- new feature, provider adapter, or tool
 - `fix:` -- bug fix
 - `docs:` -- documentation changes
 - `chore:` -- maintenance, dependency updates
 - `refactor:` -- code restructuring
 
-### Skills
+### Provider adapters
 
-- Create a directory under `skills/` with a descriptive kebab-case name
-- Include a `SKILL.md` with YAML frontmatter (`title`, `description`, `globs`)
-- Add the path to `.cursor-plugin/plugin.json`
+- Implement the `Provider` interface in `src/providers/`
+- Register the adapter in `ProviderManager`
 
-### Rules
+### Tools
 
-- Create a `.mdc` file under `rules/`
-- Include frontmatter with `description`, `globs`, and `alwaysApply`
-- Add the path to `.cursor-plugin/plugin.json`
+- Register the tool in `src/tools/`
+- Add it to `mcp-tools.json`
+- Add vitest tests
+
+Never hand-edit the version; CI auto-bumps `package.json`.
 
 ## Pull Request Process
 
-1. Ensure CI passes (the `validate.yml` workflow checks structure and quality)
+1. Ensure CI passes (`npm run build`, `npm test`, `npm run typecheck`)
 2. Update `CHANGELOG.md` if the change is user-facing
 3. Use a descriptive PR title following conventional commit format
 
@@ -52,8 +53,7 @@ By submitting a contribution to this repository, you certify that you have the r
 Every commit in a pull request must carry a `Signed-off-by:` trailer matching the commit author. Sign at commit time with the `-s` flag:
 
 ```bash
-git commit -s -m "feat: add new skill"
-```
+git commit -s -m "feat: add new tool"```
 
 This appends a line like `Signed-off-by: Jane Developer <jane@example.com>` to the commit message. The GitHub DCO App enforces this on every PR.
 

@@ -9,7 +9,12 @@ This file tells AI coding agents how the Local AI MCP repo works and how to cont
 This is an MCP server. It contains:
 
 - **`src/`** -- TypeScript source code
+- **`src/providers/`** -- provider adapters implementing the `Provider` interface, wired into `ProviderManager`
+- **`src/tools/`** -- the registered MCP tools (stdio transport only)
 - **`package.json`** -- npm package manifest (version source of truth)
+- **`mcp-tools.json`** -- enumerates the MCP tools this server exposes
+- **`docs/`** -- documentation and GitHub Pages site
+- **`CHANGELOG.md`** -- release history
 
 ## Branching and commit model
 
@@ -22,21 +27,23 @@ This is an MCP server. It contains:
 
 ## CI/CD workflows
 
-### `validate.yml` (runs on PR and push to main)
+### `ci.yml` (runs on PR and push to main)
 
-Checks:
-- TypeScript compilation
-- Lint checks
-- Test suite
+Builds and runs the test suite on Node 20 and 22:
+- TypeScript build (`npm run build`)
+- Test suite (`npm test`, vitest, offline)
 
-### `release.yml` (runs on push to main, ignores docs/md changes)
+### `release.yml` (runs on push to main)
 
-Automatic flow:
-1. Reads current version from `package.json`
-2. Determines bump type from conventional commit messages since last tag
-3. Computes new semver version
-4. Updates version files and README badge
-5. Commits with `[skip ci]`, creates git tag and GitHub Release
+Conventional-commit auto-bump: determines the bump type from commit messages since the last tag, updates `package.json`, creates a git tag and GitHub Release.
+
+### `publish.yml` (runs on release published or workflow_dispatch)
+
+Publishes the package to npm.
+
+### `drift-check.yml`
+
+Checks this repo against the ecosystem standards for drift.
 
 ### `pages.yml` (deploys docs/ to GitHub Pages)
 
@@ -45,6 +52,10 @@ Builds and deploys the documentation site on push to main.
 ### `stale.yml`
 
 Marks issues/PRs as stale after 30 days of inactivity.
+
+### `label-sync.yml`
+
+Keeps repository labels in sync.
 
 ## Version management
 
@@ -55,11 +66,23 @@ Marks issues/PRs as stale after 30 days of inactivity.
 ## Code conventions
 
 - No hardcoded credentials -- CI scans for password/token/api_key patterns.
-- Skills must have YAML frontmatter starting with `---`.
-- Rules use `.mdc` extension with frontmatter.
+- Conventional commits; never hand-edit the version.
+- Keep `mcp-tools.json` in sync with the tools registered in `src/tools/`.
 
 ## Adding content
 
+### New provider adapter
+
+1. Implement the `Provider` interface in `src/providers/`
+2. Register the adapter in `ProviderManager`
+3. Use `feat:` commit prefix
+
+### New tool
+
+1. Register the tool in `src/tools/`
+2. Add it to `mcp-tools.json`
+3. Add vitest tests
+4. Use `feat:` commit prefix
 
 ## License
 

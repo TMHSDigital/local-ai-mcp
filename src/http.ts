@@ -20,14 +20,16 @@ const DEFAULT_TIMEOUT_MS = 120000;
 
 export async function httpText(url: string, opts: HttpOptions = {}): Promise<string> {
   const { method = "GET", headers = {}, body, timeoutMs = DEFAULT_TIMEOUT_MS } = opts;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // timeoutMs <= 0 disables the timeout entirely: no AbortController, no abort.
+  const useTimeout = timeoutMs > 0;
+  const controller = useTimeout ? new AbortController() : undefined;
+  const timer = useTimeout ? setTimeout(() => controller!.abort(), timeoutMs) : undefined;
   try {
     const res = await fetch(url, {
       method,
       headers,
       body,
-      signal: controller.signal,
+      signal: controller?.signal,
     });
     const text = await res.text();
     if (!res.ok) {
@@ -35,7 +37,7 @@ export async function httpText(url: string, opts: HttpOptions = {}): Promise<str
     }
     return text;
   } finally {
-    clearTimeout(timer);
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
