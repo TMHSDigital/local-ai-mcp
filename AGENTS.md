@@ -19,10 +19,12 @@ This is an MCP server. It contains:
 ## Branching and commit model
 
 - **Single branch**: `main` only. No develop/release branches.
-- **Conventional commits** are required. The release workflow parses them:
-  - `feat:` or `feat(scope):` -- triggers a **minor** version bump
-  - `feat!:` or `BREAKING CHANGE` -- triggers a **major** version bump
-  - Everything else (`fix:`, `chore:`, `docs:`, etc.) -- triggers a **patch** bump
+- **Conventional commits** are required. Use them to decide your version bump:
+  - `feat:` or `feat(scope):` -- bump the **minor** version
+  - `feat!:` or a `BREAKING CHANGE` trailer -- bump the **major** version
+  - everything else (`fix:`, `chore:`, `docs:`, etc.) -- bump the **patch** version
+
+  Apply the bump in your PR with `npm version <patch|minor|major> --no-git-tag-version` (keeps `package.json` and the lockfile in sync); `release.yml` tags and publishes that version on merge. CI never writes to `main`.
 - Commit messages should be concise and describe the "why", not the "what".
 
 ## CI/CD workflows
@@ -66,7 +68,7 @@ Keeps repository labels in sync.
 ## Code conventions
 
 - No hardcoded credentials -- CI scans for password/token/api_key patterns.
-- Conventional commits; never hand-edit the version.
+- Conventional commits; bump the version deliberately in your PR (CI tags and publishes it).
 - Keep `mcp-tools.json` in sync with the tools registered in `src/tools/`.
 
 ## Adding content

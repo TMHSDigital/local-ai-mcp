@@ -1,11 +1,20 @@
 # Changelog
 
 All notable changes to Local AI MCP are documented in this file. The format is
-based on [Keep a Changelog](https://keepachangelog.com/). Versions are bumped
-automatically from conventional commits by the release workflow; never edit the
-version by hand.
+based on [Keep a Changelog](https://keepachangelog.com/). Bump the version in
+each PR (following conventional-commit intent); on merge the release workflow
+tags that version and publishes it.
 
 ## [Unreleased]
+
+## [0.1.2] - 2026-06-14
+
+### Changed
+
+- Release chain is now PAT-free: `release.yml` uses the default `GITHUB_TOKEN`
+  to push tags and create the GitHub Release, then explicitly dispatches
+  `publish.yml` (a `GITHUB_TOKEN` release does not auto-trigger it). Removed the
+  dependency on `RELEASE_PAT`, which was read-only and could not push.
 
 ## [0.1.1] - 2026-06-14
 
@@ -14,10 +23,10 @@ version by hand.
 - Docs and metadata now describe an MCP server (provider adapters, tool
   registration, stdio transport, npx install) instead of cursor-plugin
   boilerplate.
-- Rewrote the release workflow to auto-bump from conventional commits and create
-  the release with a token that actually triggers publishing; the publish
-  workflow now runs on a published release or manual dispatch and skips a
-  version that is already on npm.
+- Adopted a tag-only release model compatible with the protected `main` branch:
+  bump the version in your PR; `release.yml` tags it and creates the release,
+  and `publish.yml` builds, tests, and publishes (skipping a version already on
+  npm). CI never writes to `main`.
 
 ### Fixed
 
