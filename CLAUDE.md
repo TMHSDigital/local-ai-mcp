@@ -8,7 +8,7 @@ This file provides guidance for Claude Code when working in this repository.
 
 Local AI MCP -- Unified MCP server for managing local model runtimes (Ollama, LM Studio, and more): provider-agnostic discovery, lifecycle, hardware-fit, and delegated inference.
 
-**Version:** 0.1.0
+**Version:** 0.1.2
 **License:** CC-BY-NC-ND-4.0
 **Author:** TMHSDigital
 
