@@ -1,4 +1,4 @@
-export type ProviderId = "ollama" | "lmstudio";
+export type ProviderId = "ollama" | "lmstudio" | "moonshot";
 
 export interface ModelSummary {
   id: string;

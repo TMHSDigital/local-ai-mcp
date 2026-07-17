@@ -1,6 +1,6 @@
 {
   "name": "@tmhs/local-ai-mcp",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Unified MCP server for managing local model runtimes (Ollama, LM Studio, and more): provider-agnostic discovery, lifecycle, hardware-fit, and delegated inference.",
   "type": "module",
   "main": "dist/index.js",

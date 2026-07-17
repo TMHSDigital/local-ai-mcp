@@ -1,5 +1,6 @@
 import type { Config } from "../config.js";
 import { LMStudioProvider } from "./lmstudio.js";
+import { MoonshotProvider } from "./moonshot.js";
 import { OllamaProvider } from "./ollama.js";
 import type { Provider, ProviderId } from "./types.js";
 
@@ -10,6 +11,7 @@ export class ProviderManager {
     this.providers = [
       new OllamaProvider(config.ollamaHost),
       new LMStudioProvider(config.lmstudioHost),
+      new MoonshotProvider(config.moonshotHost, config.moonshotApiKey),
     ];
   }
 
