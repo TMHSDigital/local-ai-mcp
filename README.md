@@ -3,12 +3,12 @@
 **Unified MCP server for managing local model runtimes (Ollama, LM Studio, and more): provider-agnostic discovery, lifecycle, hardware-fit, and delegated inference.**
 
 ![License: CC-BY-NC-ND-4.0](https://img.shields.io/badge/license-CC--BY--NC--ND--4.0-green)
-![Version](https://img.shields.io/badge/version-0.1.2-blue)
+![Version](https://img.shields.io/badge/version-0.2.0-blue)
 ![Type](https://img.shields.io/badge/type-mcp--server-7c3aed)
 
 ---
 
-Local AI MCP is an [MCP](https://modelcontextprotocol.io) server that turns your local model runtimes into an agent-callable control plane. It is **operations-first**: its primary job is to discover, inspect, fit, and manage the models running on your own machine. It speaks to runtimes over their local HTTP APIs and exposes one consistent tool surface across them, so an agent does not need to know whether a model lives in Ollama or LM Studio.
+Local AI MCP is an [MCP](https://modelcontextprotocol.io) server that turns your local model runtimes into an agent-callable control plane. It is **operations-first**: its primary job is to discover, inspect, fit, and manage the models running on your own machine. It speaks to runtimes over their local HTTP APIs and exposes one consistent tool surface across them, so an agent does not need to know whether a model lives in Ollama or LM Studio. The server is **local-first**: local runtimes are the primary target, with optional hosted providers (such as Moonshot AI) available behind the same tool surface when you configure an API key.
 
 The server communicates over **stdio only**. It is a *client* to your local runtimes and never opens a network listener of its own.
 
@@ -20,7 +20,7 @@ The server communicates over **stdio only**. It is a *client* to your local runt
 
 ## Inference is delegation, not chat
 
-The `complete` and `embed` tools exist to **delegate (offload) inference to a local model** for cost control and privacy: keep tokens and data on your own hardware instead of sending them to a hosted API. They are deliberately framed as delegated/offloaded inference primitives, not as a conversational chat surface.
+The `complete` and `embed` tools exist to **delegate (offload) inference to a model you choose** for cost control and privacy: by default that means keeping tokens and data on your own hardware, with hosted providers as an explicit opt-in. They are deliberately framed as delegated/offloaded inference primitives, not as a conversational chat surface.
 
 ## The provider-adapter model
 
@@ -30,8 +30,9 @@ Each runtime is implemented as an adapter behind a single `Provider` interface (
 |---------|--------------|-----------|-------|
 | **Ollama** (`src/providers/ollama.ts`) | `http://localhost:11434` | Native REST + OpenAI-compatible | `load`/`unload` map to Ollama `keep_alive` semantics (`keep_alive` to load, `keep_alive: 0` to unload). `complete`/`embed` use the OpenAI-compatible `/v1` routes. |
 | **LM Studio** (`src/providers/lmstudio.ts`) | `http://localhost:1234` | REST (`/api/v0`) + OpenAI-compatible | Uses the `lms` CLI for `load`/`unload`/`pull`/`remove` when present; falls back to REST for `listModels`/`listLoaded`/`complete`/`embed`. |
+| **Moonshot AI (Kimi)** (`src/providers/moonshot.ts`) | `https://api.moonshot.ai/v1` | Hosted OpenAI-compatible | Requires `MOONSHOT_API_KEY` (Bearer auth); not detected without it. `complete` and `listModels` only; lifecycle (`pull`/`remove`/`load`/`unload`) and `embed` are unsupported for the hosted API. Flagship model: `kimi-k3`. |
 
-**Auto-detection:** on each call the server probes the configured local endpoints to determine which runtimes are live. Hardware probing is isolated in `src/hardware/` and branches by platform (Windows / Linux); it exposes total/free RAM and, where detectable, GPU name and VRAM.
+**Auto-detection:** on each call the server probes the configured endpoints to determine which providers are live (hosted providers require their API key to be set). Hardware probing is isolated in `src/hardware/` and branches by platform (Windows / Linux); it exposes total/free RAM and, where detectable, GPU name and VRAM.
 
 ## Tool surface (16 tools)
 
@@ -71,7 +72,7 @@ Each runtime is implemented as an adapter behind a single `Provider` interface (
 | `complete` | Delegate a completion to a local model (cost/privacy offload, not chat). |
 | `embed` | Delegate embedding generation to a local model. |
 
-Every tool except `system_resources` accepts an optional `provider` (`ollama` \| `lmstudio`). Omit it to operate across all detected runtimes.
+Every tool except `system_resources` accepts an optional `provider` (`ollama` \| `lmstudio` \| `moonshot`). Omit it to operate across all detected runtimes.
 
 ## Install and run
 
@@ -89,7 +90,8 @@ npx @tmhs/local-ai-mcp
       "args": ["-y", "@tmhs/local-ai-mcp"],
       "env": {
         "OLLAMA_HOST": "http://localhost:11434",
-        "LMSTUDIO_HOST": "http://localhost:1234"
+        "LMSTUDIO_HOST": "http://localhost:1234",
+        "MOONSHOT_API_KEY": "your-moonshot-api-key"
       }
     }
   }
@@ -104,6 +106,8 @@ All configuration is via environment variables with sane defaults:
 |----------|---------|-------------|
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama base URL (scheme optional; added if missing). |
 | `LMSTUDIO_HOST` | `http://localhost:1234` | LM Studio base URL. |
+| `MOONSHOT_HOST` | `https://api.moonshot.ai/v1` | Moonshot AI base URL (include the `/v1` path). |
+| `MOONSHOT_API_KEY` | *(unset)* | Moonshot AI API key (Bearer token). The provider is skipped when unset. |
 | `LOCAL_AI_REQUEST_TIMEOUT_MS` | `120000` | Timeout for normal requests (inference, pull progress, etc.). |
 | `LOCAL_AI_DETECT_TIMEOUT_MS` | `1500` | Timeout for provider auto-detection probes. |
 | `LOCAL_AI_PULL_TIMEOUT_MS` | `3600000` | Timeout for model pulls (multi-GB downloads); set `0` to disable. |

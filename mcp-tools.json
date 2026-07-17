@@ -5,7 +5,7 @@
     "inputSchema": {
       "type": "object",
       "properties": {
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio"], "description": "Optional provider id to filter to" }
+        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot"], "description": "Optional provider id to filter to" }
       },
       "required": []
     }
@@ -16,7 +16,7 @@
     "inputSchema": {
       "type": "object",
       "properties": {
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio"], "description": "Optional provider id" }
+        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot"], "description": "Optional provider id" }
       },
       "required": []
     }
@@ -27,7 +27,7 @@
     "inputSchema": {
       "type": "object",
       "properties": {
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio"], "description": "Optional provider id" }
+        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot"], "description": "Optional provider id" }
       },
       "required": []
     }
@@ -39,7 +39,7 @@
       "type": "object",
       "properties": {
         "model": { "type": "string", "description": "Model id/name to inspect" },
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio"], "description": "Optional provider id" }
+        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot"], "description": "Optional provider id" }
       },
       "required": ["model"]
     }
@@ -51,7 +51,7 @@
       "type": "object",
       "properties": {
         "model": { "type": "string", "description": "Model id/name to pull (download)" },
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio"], "description": "Optional provider id" }
+        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot"], "description": "Optional provider id" }
       },
       "required": ["model"]
     }
@@ -64,7 +64,7 @@
       "properties": {
         "model": { "type": "string", "description": "Model id/name to remove" },
         "confirm": { "type": "boolean", "description": "Must be true to perform this destructive deletion" },
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio"], "description": "Required provider id (delete is scoped to a single provider)" }
+        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot"], "description": "Required provider id (delete is scoped to a single provider)" }
       },
       "required": ["model", "confirm", "provider"]
     }
@@ -77,7 +77,7 @@
       "properties": {
         "model": { "type": "string", "description": "Model id/name to load" },
         "keepAlive": { "type": "string", "description": "How long to keep the model resident, e.g. '5m'" },
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio"], "description": "Optional provider id" }
+        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot"], "description": "Optional provider id" }
       },
       "required": ["model"]
     }
@@ -89,7 +89,7 @@
       "type": "object",
       "properties": {
         "model": { "type": "string", "description": "Model id/name to unload" },
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio"], "description": "Optional provider id" }
+        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot"], "description": "Optional provider id" }
       },
       "required": ["model"]
     }
@@ -100,7 +100,7 @@
     "inputSchema": {
       "type": "object",
       "properties": {
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio"], "description": "Optional provider id" }
+        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot"], "description": "Optional provider id" }
       },
       "required": []
     }
@@ -122,7 +122,7 @@
       "properties": {
         "model": { "type": "string", "description": "Model id/name to check" },
         "sizeBytes": { "type": "number", "description": "Optional explicit model size in bytes (overrides lookup)" },
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio"], "description": "Optional provider id" }
+        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot"], "description": "Optional provider id" }
       },
       "required": ["model"]
     }
@@ -136,7 +136,7 @@
         "model": { "type": "string", "description": "Model id/name to benchmark" },
         "prompt": { "type": "string", "description": "Optional prompt; a short default is used otherwise" },
         "maxTokens": { "type": "number", "description": "Max tokens to generate (default 64)" },
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio"], "description": "Optional provider id" }
+        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot"], "description": "Optional provider id" }
       },
       "required": ["model"]
     }
@@ -186,7 +186,7 @@
         "maxTokens": { "type": "number", "description": "Maximum tokens to generate" },
         "temperature": { "type": "number", "description": "Sampling temperature" },
         "stop": { "type": "array", "items": { "type": "string" }, "description": "Stop sequences" },
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio"], "description": "Optional provider id" }
+        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot"], "description": "Optional provider id" }
       },
       "required": ["model"]
     }
@@ -205,7 +205,7 @@
             { "type": "array", "items": { "type": "string" } }
           ]
         },
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio"], "description": "Optional provider id" }
+        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot"], "description": "Optional provider id" }
       },
       "required": ["model", "input"]
     }

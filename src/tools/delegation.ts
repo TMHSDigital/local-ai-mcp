@@ -19,7 +19,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
       maxTokens: z.number().optional().describe("Maximum tokens to generate"),
       temperature: z.number().optional().describe("Sampling temperature"),
       stop: z.array(z.string()).optional().describe("Stop sequences"),
-      provider: z.enum(["ollama", "lmstudio"]).optional().describe("Optional provider id"),
+      provider: z.enum(["ollama", "lmstudio", "moonshot"]).optional().describe("Optional provider id"),
     },
     async ({ model, prompt, messages, maxTokens, temperature, stop, provider }) => {
       try {
@@ -50,7 +50,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
       input: z
         .union([z.string(), z.array(z.string())])
         .describe("Text or array of texts to embed"),
-      provider: z.enum(["ollama", "lmstudio"]).optional().describe("Optional provider id"),
+      provider: z.enum(["ollama", "lmstudio", "moonshot"]).optional().describe("Optional provider id"),
     },
     async ({ model, input, provider }) => {
       try {

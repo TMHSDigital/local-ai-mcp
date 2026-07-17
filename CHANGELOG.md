@@ -7,6 +7,23 @@ tags that version and publishes it.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-16
+
+### Added
+
+- Moonshot AI (Kimi) provider adapter (`moonshot`): the first hosted,
+  OpenAI-compatible provider behind the same `Provider` interface. Configured
+  via `MOONSHOT_API_KEY` (Bearer auth, required) and `MOONSHOT_HOST` (default
+  `https://api.moonshot.ai/v1`). Supports `complete`, `listModels`,
+  `modelInfo`, `health_check`, and detection; lifecycle operations and `embed`
+  are intentionally unsupported for the hosted API. Flagship model: `kimi-k3`.
+- `.env.example` documenting all environment variables with placeholders.
+
+### Changed
+
+- README now frames the server as local-first with optional hosted providers,
+  instead of exclusively local offload.
+
 ## [0.1.2] - 2026-06-14
 
 ### Changed

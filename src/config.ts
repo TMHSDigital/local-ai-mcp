@@ -1,6 +1,8 @@
 export interface Config {
   ollamaHost: string;
   lmstudioHost: string;
+  moonshotHost: string;
+  moonshotApiKey: string | undefined;
   requestTimeoutMs: number;
   detectTimeoutMs: number;
   pullTimeoutMs: number;
@@ -31,6 +33,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     ollamaHost: normalizeHost(env.OLLAMA_HOST ?? "http://localhost:11434"),
     lmstudioHost: normalizeHost(env.LMSTUDIO_HOST ?? "http://localhost:1234"),
+    moonshotHost: normalizeHost(env.MOONSHOT_HOST ?? "https://api.moonshot.ai/v1"),
+    moonshotApiKey: env.MOONSHOT_API_KEY?.trim() || undefined,
     requestTimeoutMs: parseIntEnv(env.LOCAL_AI_REQUEST_TIMEOUT_MS, 120000),
     detectTimeoutMs: parseIntEnv(env.LOCAL_AI_DETECT_TIMEOUT_MS, 1500),
     pullTimeoutMs: parseTimeoutEnv(env.LOCAL_AI_PULL_TIMEOUT_MS, 3600000),

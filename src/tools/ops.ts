@@ -43,7 +43,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
   server.tool(
     "health_check",
     "Check whether each provider's local runtime is reachable and report its version. Without a provider arg, checks all configured providers.",
-    { provider: z.enum(["ollama", "lmstudio"]).optional().describe("Optional provider id") },
+    { provider: z.enum(["ollama", "lmstudio", "moonshot"]).optional().describe("Optional provider id") },
     async ({ provider }) => {
       try {
         const targets = provider ? [manager.get(provider)].filter(Boolean) : manager.providers;
@@ -84,7 +84,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
         .number()
         .optional()
         .describe("Optional explicit model size in bytes (overrides lookup)"),
-      provider: z.enum(["ollama", "lmstudio"]).optional().describe("Optional provider id"),
+      provider: z.enum(["ollama", "lmstudio", "moonshot"]).optional().describe("Optional provider id"),
     },
     async ({ model, sizeBytes, provider }) => {
       try {
@@ -115,7 +115,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
       model: z.string().describe("Model id/name to benchmark"),
       prompt: z.string().optional().describe("Optional prompt; a short default is used otherwise"),
       maxTokens: z.number().optional().describe("Max tokens to generate (default 64)"),
-      provider: z.enum(["ollama", "lmstudio"]).optional().describe("Optional provider id"),
+      provider: z.enum(["ollama", "lmstudio", "moonshot"]).optional().describe("Optional provider id"),
     },
     async ({ model, prompt, maxTokens, provider }) => {
       try {
