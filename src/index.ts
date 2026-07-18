@@ -37,7 +37,7 @@ async function main(): Promise<void> {
 
   // stdout is the MCP channel; all logs must go to stderr only.
   process.stderr.write(
-    `local-ai-mcp ready (ollama=${config.ollamaHost}, lmstudio=${config.lmstudioHost})\n`,
+    `local-ai-mcp ready (ollama=${config.ollamaHost}, lmstudio=${config.lmstudioHost}, llamacpp=${config.llamacppHost})\n`,
   );
 }
 

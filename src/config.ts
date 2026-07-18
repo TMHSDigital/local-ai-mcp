@@ -3,6 +3,10 @@ export interface Config {
   lmstudioHost: string;
   moonshotHost: string;
   moonshotApiKey: string | undefined;
+  /** When set, registers the generic OpenAI-compatible adapter. */
+  openaiCompatHost: string | undefined;
+  openaiCompatApiKey: string | undefined;
+  llamacppHost: string;
   requestTimeoutMs: number;
   detectTimeoutMs: number;
   pullTimeoutMs: number;
@@ -30,11 +34,15 @@ function parseTimeoutEnv(value: string | undefined, fallback: number): number {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  const openaiCompatRaw = env.OPENAI_COMPAT_HOST?.trim();
   return {
     ollamaHost: normalizeHost(env.OLLAMA_HOST ?? "http://localhost:11434"),
     lmstudioHost: normalizeHost(env.LMSTUDIO_HOST ?? "http://localhost:1234"),
     moonshotHost: normalizeHost(env.MOONSHOT_HOST ?? "https://api.moonshot.ai/v1"),
     moonshotApiKey: env.MOONSHOT_API_KEY?.trim() || undefined,
+    openaiCompatHost: openaiCompatRaw ? normalizeHost(openaiCompatRaw) : undefined,
+    openaiCompatApiKey: env.OPENAI_COMPAT_API_KEY?.trim() || undefined,
+    llamacppHost: normalizeHost(env.LLAMACPP_HOST ?? "http://localhost:8080"),
     requestTimeoutMs: parseIntEnv(env.LOCAL_AI_REQUEST_TIMEOUT_MS, 120000),
     detectTimeoutMs: parseIntEnv(env.LOCAL_AI_DETECT_TIMEOUT_MS, 1500),
     pullTimeoutMs: parseTimeoutEnv(env.LOCAL_AI_PULL_TIMEOUT_MS, 3600000),

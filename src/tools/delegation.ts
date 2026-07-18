@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { providerIdZod } from "./provider-id.js";
 import type { ToolContext } from "./context.js";
 import { errMsg, fail, ok } from "./helpers.js";
 
@@ -25,7 +26,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
         .describe(
           "Stream tokens from the provider (default true). Progress notifications are sent when the client provides a progressToken.",
         ),
-      provider: z.enum(["ollama", "lmstudio", "moonshot"]).optional().describe("Optional provider id"),
+      provider: providerIdZod.optional().describe("Optional provider id"),
     },
     async ({ model, prompt, messages, maxTokens, temperature, stop, stream, provider }, extra) => {
       try {
@@ -73,7 +74,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
       input: z
         .union([z.string(), z.array(z.string())])
         .describe("Text or array of texts to embed"),
-      provider: z.enum(["ollama", "lmstudio", "moonshot"]).optional().describe("Optional provider id"),
+      provider: providerIdZod.optional().describe("Optional provider id"),
     },
     async ({ model, input, provider }) => {
       try {

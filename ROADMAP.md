@@ -2,7 +2,7 @@
 
 # Roadmap
 
-**Current:** v0.3.0
+**Current:** v0.4.0
 
 ## Local AI MCP
 
@@ -22,18 +22,21 @@
 - [x] Local-first framing: hosted providers are explicit opt-in via API key, never auto-detected
 - [x] `.env.example` documenting all environment variables
 
-### v0.3.0 -- Streaming + hardware parity
+### v0.3.0 -- Streaming + hardware parity (shipped)
 
 - [x] Streaming delegated `complete` (MCP progress notifications / chunked results where the SDK allows)
-- [ ] macOS hardware probe in `src/hardware/` (RAM + Apple Silicon unified memory / Metal VRAM where detectable)
 - [x] Smarter `fit_check`: account for KV-cache/context overhead, not just weight size
 - [x] Docs site catch-up: Moonshot adapter row, environment variables, current tool count
 
+### Deferred
+
+- [ ] macOS hardware probe in `src/hardware/` (RAM + Apple Silicon unified memory / Metal VRAM where detectable)
+
 ### v0.4.0 -- More local runtimes
 
-- [ ] Generic OpenAI-compatible local adapter (arbitrary host via config; covers llama.cpp server, vLLM, Jan, and friends)
-- [ ] First-class llama.cpp server adapter (native `/health`, `/props`, slot introspection)
-- [ ] Expand the model catalog and `search_available` coverage for current model families
+- [x] Generic OpenAI-compatible local adapter (arbitrary host via config; covers llama.cpp server, vLLM, Jan, and friends)
+- [x] First-class llama.cpp server adapter (native `/health`, `/props`, slot introspection)
+- [x] Expand the model catalog and `search_available` coverage for current model families
 
 ### v0.5.0 -- Ops depth
 

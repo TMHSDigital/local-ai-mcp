@@ -1,4 +1,12 @@
-export type ProviderId = "ollama" | "lmstudio" | "moonshot";
+export const PROVIDER_IDS = [
+  "ollama",
+  "lmstudio",
+  "moonshot",
+  "openaicompat",
+  "llamacpp",
+] as const;
+
+export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 export interface ModelSummary {
   id: string;

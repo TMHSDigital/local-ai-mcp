@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { providerIdZod } from "./provider-id.js";
 import type { ToolContext } from "./context.js";
 import { aggregate, errMsg, fail, ok } from "./helpers.js";
 
@@ -8,8 +9,8 @@ export function register(server: McpServer, ctx: ToolContext): void {
 
   server.tool(
     "list_providers",
-    "List the configured local model runtime providers (Ollama, LM Studio) with their host, whether they are detected/live, and their capabilities. Optionally filter to a single provider.",
-    { provider: z.enum(["ollama", "lmstudio", "moonshot"]).optional().describe("Optional provider id to filter to") },
+    "List the configured model runtime providers (Ollama, LM Studio, llama.cpp, optional OpenAI-compat / Moonshot) with their host, whether they are detected/live, and their capabilities. Optionally filter to a single provider.",
+    { provider: providerIdZod.optional().describe("Optional provider id to filter to") },
     async ({ provider }) => {
       try {
         const targets = provider ? [manager.get(provider)].filter(Boolean) : manager.providers;
@@ -38,7 +39,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
   server.tool(
     "list_models",
     "List models installed/available on each detected provider. Without a provider arg, aggregates across all detected providers keyed by provider.",
-    { provider: z.enum(["ollama", "lmstudio", "moonshot"]).optional().describe("Optional provider id") },
+    { provider: providerIdZod.optional().describe("Optional provider id") },
     async ({ provider }) => {
       try {
         const providers = await manager.resolve(provider, config.detectTimeoutMs);
@@ -53,7 +54,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
   server.tool(
     "list_loaded",
     "List models currently loaded into memory on each detected provider. Without a provider arg, aggregates across all detected providers keyed by provider.",
-    { provider: z.enum(["ollama", "lmstudio", "moonshot"]).optional().describe("Optional provider id") },
+    { provider: providerIdZod.optional().describe("Optional provider id") },
     async ({ provider }) => {
       try {
         const providers = await manager.resolve(provider, config.detectTimeoutMs);
@@ -70,7 +71,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
     "Show detailed metadata for a specific model (family, parameter size, quantization, context length). Without a provider arg, queries all detected providers.",
     {
       model: z.string().describe("Model id/name to inspect"),
-      provider: z.enum(["ollama", "lmstudio", "moonshot"]).optional().describe("Optional provider id"),
+      provider: providerIdZod.optional().describe("Optional provider id"),
     },
     async ({ model, provider }) => {
       try {

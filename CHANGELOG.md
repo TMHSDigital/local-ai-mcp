@@ -7,6 +7,25 @@ tags that version and publishes it.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-18
+
+### Added
+
+- `llamacpp` provider: first-class llama.cpp server adapter using native
+  `/health`, `/props`, `/slots` plus OpenAI-compatible `/v1` routes
+  (`LLAMACPP_HOST`, default `http://localhost:8080`).
+- `openaicompat` provider: generic OpenAI-compatible local adapter, opt-in via
+  `OPENAI_COMPAT_HOST` (and optional `OPENAI_COMPAT_API_KEY`) for vLLM, Jan, and
+  similar `/v1` servers.
+- Expanded curated model catalog (llama3.3, qwen3, gemma3, phi4, deepseek-r1
+  sizes, mistral-nemo/small, more embed/vision/code entries).
+- Shared `PROVIDER_IDS` / `providerIdZod` so tool schemas stay in sync.
+
+### Changed
+
+- Deferred macOS hardware probe out of the v0.3 checklist into a Deferred
+  section on the roadmap.
+
 ## [0.3.0] - 2026-07-18
 
 ### Added
