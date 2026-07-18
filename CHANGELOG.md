@@ -7,6 +7,13 @@ tags that version and publishes it.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-18
+
+### Changed
+
+- Expanded `ROADMAP.md` to reflect shipped v0.2.0 and outline concrete
+  milestones through v1.0.0 (streaming, macOS hardware, llama.cpp, ops depth).
+
 ## [0.2.0] - 2026-07-16
 
 ### Added
