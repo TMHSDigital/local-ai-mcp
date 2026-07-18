@@ -3,7 +3,7 @@
 **Unified MCP server for managing local model runtimes (Ollama, LM Studio, and more): provider-agnostic discovery, lifecycle, hardware-fit, and delegated inference.**
 
 ![License: CC-BY-NC-ND-4.0](https://img.shields.io/badge/license-CC--BY--NC--ND--4.0-green)
-![Version](https://img.shields.io/badge/version-0.2.1-blue)
+![Version](https://img.shields.io/badge/version-0.3.0-blue)
 ![Type](https://img.shields.io/badge/type-mcp--server-7c3aed)
 
 ---
@@ -57,7 +57,7 @@ Each runtime is implemented as an adapter behind a single `Provider` interface (
 |------|-------------|
 | `health_check` | Liveness and version per provider. |
 | `system_resources` | Total/free RAM, CPU count, and GPU/VRAM. |
-| `fit_check` | Whether a model fits in free VRAM (GPU) or RAM (CPU), with the numbers. |
+| `fit_check` | Whether weight + KV-cache estimate fits in free VRAM (GPU) or RAM (CPU). |
 | `benchmark` | Measure latency and tokens/sec with one small completion. **Heavy: runs real inference.** |
 
 ### Registry
@@ -69,7 +69,7 @@ Each runtime is implemented as an adapter behind a single `Provider` interface (
 ### Delegation (offloaded inference)
 | Tool | Description |
 |------|-------------|
-| `complete` | Delegate a completion to a local model (cost/privacy offload, not chat). |
+| `complete` | Delegate a completion (streams via MCP progress when the client sends a progressToken). |
 | `embed` | Delegate embedding generation to a local model. |
 
 Every tool except `system_resources` accepts an optional `provider` (`ollama` \| `lmstudio` \| `moonshot`). Omit it to operate across all detected runtimes.

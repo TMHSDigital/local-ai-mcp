@@ -2,7 +2,7 @@
 
 # Roadmap
 
-**Current:** v0.2.1
+**Current:** v0.3.0
 
 ## Local AI MCP
 
@@ -24,10 +24,10 @@
 
 ### v0.3.0 -- Streaming + hardware parity
 
-- [ ] Streaming delegated `complete` (MCP progress notifications / chunked results where the SDK allows)
+- [x] Streaming delegated `complete` (MCP progress notifications / chunked results where the SDK allows)
 - [ ] macOS hardware probe in `src/hardware/` (RAM + Apple Silicon unified memory / Metal VRAM where detectable)
-- [ ] Smarter `fit_check`: account for KV-cache/context overhead, not just weight size
-- [ ] Docs site catch-up: Moonshot adapter row, environment variables, current tool count
+- [x] Smarter `fit_check`: account for KV-cache/context overhead, not just weight size
+- [x] Docs site catch-up: Moonshot adapter row, environment variables, current tool count
 
 ### v0.4.0 -- More local runtimes
 

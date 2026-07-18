@@ -8,7 +8,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
 
   server.tool(
     "complete",
-    "DELEGATED INFERENCE: Offload a text/chat completion to a local model runtime for cost savings and privacy (data never leaves the machine). This is NOT a chat feature for the user; it delegates work to a local LLM. Provide either prompt or messages. Without a provider arg, uses the first detected provider.",
+    "DELEGATED INFERENCE: Offload a text/chat completion to a local model runtime for cost savings and privacy (data never leaves the machine). This is NOT a chat feature for the user; it delegates work to a local LLM. Provide either prompt or messages. Streams tokens via MCP progress notifications when the client supplies a progressToken (stream defaults to true). Without a provider arg, uses the first detected provider.",
     {
       model: z.string().describe("Model id/name to run the completion on"),
       prompt: z.string().optional().describe("Plain prompt text (alternative to messages)"),
@@ -19,9 +19,15 @@ export function register(server: McpServer, ctx: ToolContext): void {
       maxTokens: z.number().optional().describe("Maximum tokens to generate"),
       temperature: z.number().optional().describe("Sampling temperature"),
       stop: z.array(z.string()).optional().describe("Stop sequences"),
+      stream: z
+        .boolean()
+        .optional()
+        .describe(
+          "Stream tokens from the provider (default true). Progress notifications are sent when the client provides a progressToken.",
+        ),
       provider: z.enum(["ollama", "lmstudio", "moonshot"]).optional().describe("Optional provider id"),
     },
-    async ({ model, prompt, messages, maxTokens, temperature, stop, provider }) => {
+    async ({ model, prompt, messages, maxTokens, temperature, stop, stream, provider }, extra) => {
       try {
         if (!prompt && (!messages || messages.length === 0)) {
           return fail("Provide either 'prompt' or non-empty 'messages'.");
@@ -31,9 +37,26 @@ export function register(server: McpServer, ctx: ToolContext): void {
           return fail("No live providers detected to run the completion.");
         }
         const p = providers[0];
+        const wantStream = stream !== false;
+        let progress = 0;
+        const onChunk = wantStream
+          ? async (chunk: { text: string; done: boolean }) => {
+              if (!chunk.text || extra._meta?.progressToken === undefined) return;
+              progress += 1;
+              await extra.sendNotification({
+                method: "notifications/progress",
+                params: {
+                  progressToken: extra._meta.progressToken,
+                  progress,
+                  message: chunk.text,
+                },
+              });
+            }
+          : undefined;
         const result = await p.complete(
           { model, prompt, messages, maxTokens, temperature, stop },
           config.requestTimeoutMs,
+          onChunk,
         );
         return ok(result);
       } catch (err) {
@@ -44,7 +67,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
 
   server.tool(
     "embed",
-    "DELEGATED EMBEDDINGS: Offload embedding generation to a local model runtime for cost savings and privacy. Accepts a single string or an array of strings. Without a provider arg, uses the first detected provider.",
+    "DELEGATED EMBEDDINGS: Offload embedding generation to a local model runtime for cost savings and privacy. Accepts a single string or an array of texts. Without a provider arg, uses the first detected provider.",
     {
       model: z.string().describe("Embedding model id/name"),
       input: z

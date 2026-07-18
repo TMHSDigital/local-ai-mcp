@@ -68,3 +68,65 @@ export async function probe(url: string, timeoutMs: number): Promise<boolean> {
     clearTimeout(timer);
   }
 }
+
+/**
+ * POST/GET an SSE (text/event-stream) endpoint and invoke onEvent for each
+ * `data:` payload. Stops when the stream ends or a payload equals `[DONE]`.
+ * Throws HttpError on non-2xx before the body is consumed.
+ */
+export async function httpSse(
+  url: string,
+  opts: HttpOptions,
+  onEvent: (data: string) => void | Promise<void>,
+): Promise<void> {
+  const { method = "GET", headers = {}, body, timeoutMs = DEFAULT_TIMEOUT_MS } = opts;
+  const useTimeout = timeoutMs > 0;
+  const controller = useTimeout ? new AbortController() : undefined;
+  const timer = useTimeout ? setTimeout(() => controller!.abort(), timeoutMs) : undefined;
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: {
+        Accept: "text/event-stream",
+        ...headers,
+        ...(body !== undefined && headers["Content-Type"] === undefined
+          ? { "Content-Type": "application/json" }
+          : {}),
+      },
+      body,
+      signal: controller?.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new HttpError(res.status, text, `HTTP ${res.status} for ${method} ${url}`);
+    }
+    if (!res.body) {
+      throw new Error(`SSE response from ${url} had no body`);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trimStart();
+        if (data === "" || data === "[DONE]") {
+          if (data === "[DONE]") return;
+          continue;
+        }
+        await onEvent(data);
+      }
+    }
+    if (buffer.startsWith("data:")) {
+      const data = buffer.slice(5).trimStart();
+      if (data && data !== "[DONE]") await onEvent(data);
+    }
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}

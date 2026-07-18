@@ -1,5 +1,7 @@
 import { httpJson } from "../http.js";
+import { openAiChatComplete } from "./openai-complete.js";
 import type {
+  CompletionChunkHandler,
   CompletionParams,
   CompletionResult,
   EmbedParams,
@@ -19,11 +21,6 @@ interface MoonshotModel {
   id: string;
   owned_by?: string;
   context_length?: number;
-}
-
-interface OpenAiChatResponse {
-  choices?: Array<{ message?: { content?: string } }>;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
 // Hosted API (https://api.moonshot.ai/v1): models are managed by Moonshot, so
@@ -152,30 +149,18 @@ export class MoonshotProvider implements Provider {
     throw new Error("moonshot is a hosted API; models cannot be unloaded");
   }
 
-  async complete(params: CompletionParams, timeoutMs: number): Promise<CompletionResult> {
-    const messages =
-      params.messages ?? [{ role: "user", content: params.prompt ?? "" }];
-    const start = Date.now();
-    const data = await httpJson<OpenAiChatResponse>(`${this.host}/chat/completions`, {
-      method: "POST",
-      headers: this.authHeaders(),
-      body: JSON.stringify({
-        model: params.model,
-        messages,
-        max_tokens: params.maxTokens,
-        temperature: params.temperature,
-        stop: params.stop,
-      }),
+  async complete(
+    params: CompletionParams,
+    timeoutMs: number,
+    onChunk?: CompletionChunkHandler,
+  ): Promise<CompletionResult> {
+    return openAiChatComplete(
+      `${this.host}/chat/completions`,
+      PROVIDER,
+      params,
       timeoutMs,
-    });
-    return {
-      provider: PROVIDER,
-      model: params.model,
-      text: data.choices?.[0]?.message?.content ?? "",
-      promptTokens: data.usage?.prompt_tokens,
-      completionTokens: data.usage?.completion_tokens,
-      totalDurationMs: Date.now() - start,
-    };
+      { headers: this.authHeaders(), onChunk },
+    );
   }
 
   async embed(_params: EmbedParams, _timeoutMs: number): Promise<EmbedResult> {

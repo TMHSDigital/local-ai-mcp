@@ -7,14 +7,18 @@ import { aggregate, computeFit, errMsg, fail, ok } from "./helpers.js";
 /**
  * Resolve the on-disk byte size for a model: explicit sizeBytes wins, then a
  * provider's listModels entry, then the static catalog. Returns undefined if
- * unknown.
+ * unknown. Also returns parameterSize when available (for KV-cache estimates).
  */
 export async function resolveModelSizeBytes(
   ctx: ToolContext,
   model: string,
   explicitSizeBytes: number | undefined,
   providerArg: string | undefined,
-): Promise<{ requiredBytes: number | undefined; source: string }> {
+): Promise<{
+  requiredBytes: number | undefined;
+  source: string;
+  parameterSize?: string;
+}> {
   if (typeof explicitSizeBytes === "number" && explicitSizeBytes > 0) {
     return { requiredBytes: explicitSizeBytes, source: "explicit" };
   }
@@ -24,7 +28,11 @@ export async function resolveModelSizeBytes(
       const models = await p.listModels(ctx.config.requestTimeoutMs).catch(() => []);
       const match = models.find((m) => m.id === model);
       if (match && typeof match.sizeBytes === "number" && match.sizeBytes > 0) {
-        return { requiredBytes: match.sizeBytes, source: `provider:${p.id}` };
+        return {
+          requiredBytes: match.sizeBytes,
+          source: `provider:${p.id}`,
+          parameterSize: match.parameterSize,
+        };
       }
     }
   } catch {
@@ -32,7 +40,11 @@ export async function resolveModelSizeBytes(
   }
   const cat = CATALOG.find((c) => c.name === model);
   if (cat) {
-    return { requiredBytes: cat.approxSizeBytes, source: "catalog" };
+    return {
+      requiredBytes: cat.approxSizeBytes,
+      source: "catalog",
+      parameterSize: cat.parameterSize,
+    };
   }
   return { requiredBytes: undefined, source: "unknown" };
 }
@@ -77,31 +89,37 @@ export function register(server: McpServer, ctx: ToolContext): void {
 
   server.tool(
     "fit_check",
-    "Determine whether a model fits on the local hardware. Resolves the model size from the provider or the static catalog (or an explicit sizeBytes), then compares against free GPU VRAM, falling back to system RAM. Returns fits, target (gpu/cpu/none), required and available bytes.",
+    "Determine whether a model fits on the local hardware. Resolves the model weight size from the provider or the static catalog (or an explicit sizeBytes), estimates KV-cache overhead for a context length (default 4096), then compares weight+KV against free GPU VRAM, falling back to system RAM. Returns fits, target (gpu/cpu/none), weight/kv/required/available bytes.",
     {
       model: z.string().describe("Model id/name to check"),
       sizeBytes: z
         .number()
         .optional()
-        .describe("Optional explicit model size in bytes (overrides lookup)"),
+        .describe("Optional explicit model weight size in bytes (overrides lookup)"),
+      contextLength: z
+        .number()
+        .optional()
+        .describe("Context length for KV-cache estimate (default 4096)"),
+      parameterSize: z
+        .string()
+        .optional()
+        .describe('Optional parameter size like "7B" or "3.8B" for KV estimate (overrides lookup)'),
       provider: z.enum(["ollama", "lmstudio", "moonshot"]).optional().describe("Optional provider id"),
     },
-    async ({ model, sizeBytes, provider }) => {
+    async ({ model, sizeBytes, contextLength, parameterSize, provider }) => {
       try {
-        const { requiredBytes, source } = await resolveModelSizeBytes(
-          ctx,
-          model,
-          sizeBytes,
-          provider,
-        );
-        if (requiredBytes === undefined) {
+        const resolved = await resolveModelSizeBytes(ctx, model, sizeBytes, provider);
+        if (resolved.requiredBytes === undefined) {
           return fail(
             `Could not determine size for "${model}" from provider or catalog. Pass sizeBytes to check fit explicitly.`,
           );
         }
         const resources = await hardware.getSystemResources();
-        const outcome = computeFit(resources, requiredBytes);
-        return ok({ model, sizeSource: source, ...outcome });
+        const outcome = computeFit(resources, resolved.requiredBytes, {
+          contextLength,
+          parameterSize: parameterSize ?? resolved.parameterSize,
+        });
+        return ok({ model, sizeSource: resolved.source, ...outcome });
       } catch (err) {
         return fail(errMsg(err));
       }
