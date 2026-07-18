@@ -2,7 +2,7 @@
 
 # Roadmap
 
-**Current:** v0.2.0
+**Current:** v0.2.1
 
 ## Local AI MCP
 
