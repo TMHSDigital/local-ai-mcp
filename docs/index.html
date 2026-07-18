@@ -55,6 +55,8 @@
       <tr><th>Adapter</th><th>Default host</th><th>Notes</th></tr>
       <tr><td>Ollama</td><td><code>http://localhost:11434</code></td><td>Native REST + OpenAI-compatible <code>/v1</code>; load/unload via <code>keep_alive</code>.</td></tr>
       <tr><td>LM Studio</td><td><code>http://localhost:1234</code></td><td>REST <code>/api/v0</code> + OpenAI-compatible; <code>lms</code> CLI for load/unload/pull when present.</td></tr>
+      <tr><td>llama.cpp</td><td><code>http://localhost:8080</code></td><td>Native <code>/health</code> <code>/props</code> <code>/slots</code> + OpenAI <code>/v1</code>.</td></tr>
+      <tr><td>OpenAI-compat</td><td><em>unset</em></td><td>Opt-in via <code>OPENAI_COMPAT_HOST</code> (vLLM, Jan, etc.).</td></tr>
       <tr><td>Moonshot AI (Kimi)</td><td><code>https://api.moonshot.ai/v1</code></td><td>Hosted OpenAI-compatible; requires <code>MOONSHOT_API_KEY</code>. <code>complete</code>/<code>listModels</code> only.</td></tr>
     </table>
 
@@ -85,6 +87,9 @@
     <ul class="env">
       <li><code>OLLAMA_HOST</code> &mdash; default <code>http://localhost:11434</code></li>
       <li><code>LMSTUDIO_HOST</code> &mdash; default <code>http://localhost:1234</code></li>
+      <li><code>LLAMACPP_HOST</code> &mdash; default <code>http://localhost:8080</code></li>
+      <li><code>OPENAI_COMPAT_HOST</code> &mdash; optional generic OpenAI-compatible <code>/v1</code> host</li>
+      <li><code>OPENAI_COMPAT_API_KEY</code> &mdash; optional Bearer for OpenAI-compat</li>
       <li><code>MOONSHOT_API_KEY</code> &mdash; required to enable the Moonshot adapter</li>
       <li><code>MOONSHOT_HOST</code> &mdash; default <code>https://api.moonshot.ai/v1</code></li>
       <li><code>LOCAL_AI_REQUEST_TIMEOUT_MS</code> &mdash; default <code>120000</code></li>

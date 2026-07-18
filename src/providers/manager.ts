@@ -1,7 +1,9 @@
 import type { Config } from "../config.js";
+import { LlamaCppProvider } from "./llamacpp.js";
 import { LMStudioProvider } from "./lmstudio.js";
 import { MoonshotProvider } from "./moonshot.js";
 import { OllamaProvider } from "./ollama.js";
+import { OpenAICompatProvider } from "./openaicompat.js";
 import type { Provider, ProviderId } from "./types.js";
 
 export class ProviderManager {
@@ -11,8 +13,14 @@ export class ProviderManager {
     this.providers = [
       new OllamaProvider(config.ollamaHost),
       new LMStudioProvider(config.lmstudioHost),
+      new LlamaCppProvider(config.llamacppHost),
       new MoonshotProvider(config.moonshotHost, config.moonshotApiKey),
     ];
+    if (config.openaiCompatHost) {
+      this.providers.push(
+        new OpenAICompatProvider(config.openaiCompatHost, config.openaiCompatApiKey),
+      );
+    }
   }
 
   get(id: string): Provider | undefined {

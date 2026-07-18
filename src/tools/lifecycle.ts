@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { providerIdZod } from "./provider-id.js";
 import type { ToolContext } from "./context.js";
 import { aggregate, errMsg, fail, ok, removeModelGuarded } from "./helpers.js";
 
@@ -11,7 +12,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
     "HEAVY: Download/pull a model onto a provider. WARNING: this may download multiple gigabytes and can take a long time. Without a provider arg, attempts the pull on every detected provider.",
     {
       model: z.string().describe("Model id/name to pull (download)"),
-      provider: z.enum(["ollama", "lmstudio", "moonshot"]).optional().describe("Optional provider id"),
+      provider: providerIdZod.optional().describe("Optional provider id"),
     },
     async ({ model, provider }) => {
       try {
@@ -61,7 +62,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
     {
       model: z.string().describe("Model id/name to load"),
       keepAlive: z.string().optional().describe("How long to keep the model resident, e.g. '5m'"),
-      provider: z.enum(["ollama", "lmstudio", "moonshot"]).optional().describe("Optional provider id"),
+      provider: providerIdZod.optional().describe("Optional provider id"),
     },
     async ({ model, keepAlive, provider }) => {
       try {
@@ -81,7 +82,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
     "Unload a model from memory to free VRAM/RAM. Without a provider arg, unloads from every detected provider.",
     {
       model: z.string().describe("Model id/name to unload"),
-      provider: z.enum(["ollama", "lmstudio", "moonshot"]).optional().describe("Optional provider id"),
+      provider: providerIdZod.optional().describe("Optional provider id"),
     },
     async ({ model, provider }) => {
       try {

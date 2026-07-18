@@ -3,7 +3,7 @@
 **Unified MCP server for managing local model runtimes (Ollama, LM Studio, and more): provider-agnostic discovery, lifecycle, hardware-fit, and delegated inference.**
 
 ![License: CC-BY-NC-ND-4.0](https://img.shields.io/badge/license-CC--BY--NC--ND--4.0-green)
-![Version](https://img.shields.io/badge/version-0.3.0-blue)
+![Version](https://img.shields.io/badge/version-0.4.0-blue)
 ![Type](https://img.shields.io/badge/type-mcp--server-7c3aed)
 
 ---
@@ -30,6 +30,8 @@ Each runtime is implemented as an adapter behind a single `Provider` interface (
 |---------|--------------|-----------|-------|
 | **Ollama** (`src/providers/ollama.ts`) | `http://localhost:11434` | Native REST + OpenAI-compatible | `load`/`unload` map to Ollama `keep_alive` semantics (`keep_alive` to load, `keep_alive: 0` to unload). `complete`/`embed` use the OpenAI-compatible `/v1` routes. |
 | **LM Studio** (`src/providers/lmstudio.ts`) | `http://localhost:1234` | REST (`/api/v0`) + OpenAI-compatible | Uses the `lms` CLI for `load`/`unload`/`pull`/`remove` when present; falls back to REST for `listModels`/`listLoaded`/`complete`/`embed`. |
+| **llama.cpp** (`src/providers/llamacpp.ts`) | `http://localhost:8080` | Native `/health` `/props` `/slots` + OpenAI `/v1` | Model is loaded at server start; no pull/load/unload. Slot introspection via `/slots`. |
+| **OpenAI-compat** (`src/providers/openaicompat.ts`) | *(unset)* | OpenAI-compatible `/v1` | Opt-in via `OPENAI_COMPAT_HOST` (vLLM, Jan, etc.). Inference only. |
 | **Moonshot AI (Kimi)** (`src/providers/moonshot.ts`) | `https://api.moonshot.ai/v1` | Hosted OpenAI-compatible | Requires `MOONSHOT_API_KEY` (Bearer auth); not detected without it. `complete` and `listModels` only; lifecycle (`pull`/`remove`/`load`/`unload`) and `embed` are unsupported for the hosted API. Flagship model: `kimi-k3`. |
 
 **Auto-detection:** on each call the server probes the configured endpoints to determine which providers are live (hosted providers require their API key to be set). Hardware probing is isolated in `src/hardware/` and branches by platform (Windows / Linux); it exposes total/free RAM and, where detectable, GPU name and VRAM.
@@ -72,7 +74,7 @@ Each runtime is implemented as an adapter behind a single `Provider` interface (
 | `complete` | Delegate a completion (streams via MCP progress when the client sends a progressToken). |
 | `embed` | Delegate embedding generation to a local model. |
 
-Every tool except `system_resources` accepts an optional `provider` (`ollama` \| `lmstudio` \| `moonshot`). Omit it to operate across all detected runtimes.
+Every tool except `system_resources` accepts an optional `provider` (`ollama` \| `lmstudio` \| `llamacpp` \| `openaicompat` \| `moonshot`). Omit it to operate across all detected runtimes.
 
 ## Install and run
 
@@ -106,6 +108,9 @@ All configuration is via environment variables with sane defaults:
 |----------|---------|-------------|
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama base URL (scheme optional; added if missing). |
 | `LMSTUDIO_HOST` | `http://localhost:1234` | LM Studio base URL. |
+| `LLAMACPP_HOST` | `http://localhost:8080` | llama.cpp server base URL. |
+| `OPENAI_COMPAT_HOST` | *(unset)* | Generic OpenAI-compatible `/v1` base URL (vLLM, Jan, …). Provider omitted when unset. |
+| `OPENAI_COMPAT_API_KEY` | *(unset)* | Optional Bearer token for the OpenAI-compat adapter. |
 | `MOONSHOT_HOST` | `https://api.moonshot.ai/v1` | Moonshot AI base URL (include the `/v1` path). |
 | `MOONSHOT_API_KEY` | *(unset)* | Moonshot AI API key (Bearer token). The provider is skipped when unset. |
 | `LOCAL_AI_REQUEST_TIMEOUT_MS` | `120000` | Timeout for normal requests (inference, pull progress, etc.). |

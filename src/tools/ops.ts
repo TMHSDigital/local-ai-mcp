@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { providerIdZod } from "./provider-id.js";
 import { CATALOG } from "../catalog/models.js";
 import type { ToolContext } from "./context.js";
 import { aggregate, computeFit, errMsg, fail, ok } from "./helpers.js";
@@ -55,7 +56,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
   server.tool(
     "health_check",
     "Check whether each provider's local runtime is reachable and report its version. Without a provider arg, checks all configured providers.",
-    { provider: z.enum(["ollama", "lmstudio", "moonshot"]).optional().describe("Optional provider id") },
+    { provider: providerIdZod.optional().describe("Optional provider id") },
     async ({ provider }) => {
       try {
         const targets = provider ? [manager.get(provider)].filter(Boolean) : manager.providers;
@@ -104,7 +105,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
         .string()
         .optional()
         .describe('Optional parameter size like "7B" or "3.8B" for KV estimate (overrides lookup)'),
-      provider: z.enum(["ollama", "lmstudio", "moonshot"]).optional().describe("Optional provider id"),
+      provider: providerIdZod.optional().describe("Optional provider id"),
     },
     async ({ model, sizeBytes, contextLength, parameterSize, provider }) => {
       try {
@@ -133,7 +134,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
       model: z.string().describe("Model id/name to benchmark"),
       prompt: z.string().optional().describe("Optional prompt; a short default is used otherwise"),
       maxTokens: z.number().optional().describe("Max tokens to generate (default 64)"),
-      provider: z.enum(["ollama", "lmstudio", "moonshot"]).optional().describe("Optional provider id"),
+      provider: providerIdZod.optional().describe("Optional provider id"),
     },
     async ({ model, prompt, maxTokens, provider }) => {
       try {

@@ -21,4 +21,13 @@ describe("loadConfig pullTimeoutMs", () => {
     const config = loadConfig({ LOCAL_AI_PULL_TIMEOUT_MS: "not-a-number" });
     expect(config.pullTimeoutMs).toBe(3600000);
   });
+
+  it("registers openaicompat only when OPENAI_COMPAT_HOST is set", () => {
+    const without = loadConfig({});
+    expect(without.openaiCompatHost).toBeUndefined();
+    expect(without.llamacppHost).toBe("http://localhost:8080");
+
+    const withCompat = loadConfig({ OPENAI_COMPAT_HOST: "localhost:8000/v1" });
+    expect(withCompat.openaiCompatHost).toBe("http://localhost:8000/v1");
+  });
 });
