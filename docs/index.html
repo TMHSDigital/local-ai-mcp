@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Local AI MCP</title>
-  <meta name="description" content="Unified MCP server for managing local model runtimes (Ollama, LM Studio): provider-agnostic discovery, lifecycle, hardware-fit, and delegated inference.">
+  <meta name="description" content="Unified MCP server for managing local model runtimes (Ollama, LM Studio, Moonshot): provider-agnostic discovery, lifecycle, hardware-fit, and delegated inference.">
   <style>
     :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --accent: #7c3aed; --accent2: #a78bfa; --card: #161b22; --border: #30363d; }
     * { box-sizing: border-box; }
@@ -29,6 +29,8 @@
     th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--border); font-size: .9rem; }
     th { color: var(--accent2); }
     footer { margin-top: 3rem; color: var(--muted); font-size: .85rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+    ul.env { color: var(--muted); font-size: .9rem; }
+    ul.env code { font-size: .85em; }
   </style>
 </head>
 <body>
@@ -42,10 +44,10 @@
     </p>
 
     <h2>What it is</h2>
-    <p>An operations-first control plane for the models on your own machine. It discovers, inspects, fits, and manages local runtimes over their local HTTP APIs, exposing one consistent tool surface across them. It runs over <strong>stdio only</strong> and is a client to your runtimes &mdash; it never opens a network listener of its own.</p>
+    <p>An operations-first control plane for the models on your own machine. It discovers, inspects, fits, and manages local runtimes over their local HTTP APIs, exposing one consistent tool surface across them. It runs over <strong>stdio only</strong> and is a client to your runtimes &mdash; it never opens a network listener of its own. Hosted providers (such as Moonshot AI) are an explicit opt-in behind the same tool surface.</p>
 
     <h2>Inference is delegation, not chat</h2>
-    <p>The <code>complete</code> and <code>embed</code> tools <strong>delegate (offload) inference to a local model</strong> for cost control and privacy &mdash; keeping tokens and data on your hardware instead of a hosted API. They are inference primitives, not a conversational chat surface.</p>
+    <p>The <code>complete</code> and <code>embed</code> tools <strong>delegate (offload) inference to a local model</strong> for cost control and privacy &mdash; keeping tokens and data on your hardware instead of a hosted API. They are inference primitives, not a conversational chat surface. <code>complete</code> streams tokens via MCP progress notifications when the client supplies a progress token.</p>
 
     <h2>Provider-adapter model</h2>
     <p>Each runtime is an adapter behind a single <code>Provider</code> interface. Every tool takes an optional <code>provider</code> argument; omit it and the tool operates across all detected runtimes.</p>
@@ -53,6 +55,7 @@
       <tr><th>Adapter</th><th>Default host</th><th>Notes</th></tr>
       <tr><td>Ollama</td><td><code>http://localhost:11434</code></td><td>Native REST + OpenAI-compatible <code>/v1</code>; load/unload via <code>keep_alive</code>.</td></tr>
       <tr><td>LM Studio</td><td><code>http://localhost:1234</code></td><td>REST <code>/api/v0</code> + OpenAI-compatible; <code>lms</code> CLI for load/unload/pull when present.</td></tr>
+      <tr><td>Moonshot AI (Kimi)</td><td><code>https://api.moonshot.ai/v1</code></td><td>Hosted OpenAI-compatible; requires <code>MOONSHOT_API_KEY</code>. <code>complete</code>/<code>listModels</code> only.</td></tr>
     </table>
 
     <h2>Tools (16)</h2>
@@ -67,17 +70,27 @@
       <div class="card"><h3>unload_model</h3><p>Evict a model from memory.</p></div>
       <div class="card"><h3>health_check</h3><p>Liveness and version per provider.</p></div>
       <div class="card"><h3>system_resources</h3><p>RAM, CPU, and GPU/VRAM.</p></div>
-      <div class="card"><h3>fit_check</h3><p>Does a model fit in VRAM or RAM?</p></div>
+      <div class="card"><h3>fit_check</h3><p>Does weight + KV cache fit in VRAM or RAM?</p></div>
       <div class="card"><h3>benchmark <span class="pill heavy">heavy</span></h3><p>Latency and tokens/sec.</p></div>
       <div class="card"><h3>search_available</h3><p>Search a curated model catalog.</p></div>
       <div class="card"><h3>suggest_model</h3><p>Recommend by task and hardware fit.</p></div>
-      <div class="card"><h3>complete</h3><p>Delegate a completion (offload).</p></div>
+      <div class="card"><h3>complete</h3><p>Delegate a completion (streaming).</p></div>
       <div class="card"><h3>embed</h3><p>Delegate embedding generation.</p></div>
     </div>
 
     <h2>Install</h2>
     <pre><code>npx @tmhs/local-ai-mcp</code></pre>
-    <p>Configure via <code>OLLAMA_HOST</code>, <code>LMSTUDIO_HOST</code>, <code>LOCAL_AI_REQUEST_TIMEOUT_MS</code>, and <code>LOCAL_AI_DETECT_TIMEOUT_MS</code>.</p>
+
+    <h2>Environment variables</h2>
+    <ul class="env">
+      <li><code>OLLAMA_HOST</code> &mdash; default <code>http://localhost:11434</code></li>
+      <li><code>LMSTUDIO_HOST</code> &mdash; default <code>http://localhost:1234</code></li>
+      <li><code>MOONSHOT_API_KEY</code> &mdash; required to enable the Moonshot adapter</li>
+      <li><code>MOONSHOT_HOST</code> &mdash; default <code>https://api.moonshot.ai/v1</code></li>
+      <li><code>LOCAL_AI_REQUEST_TIMEOUT_MS</code> &mdash; default <code>120000</code></li>
+      <li><code>LOCAL_AI_DETECT_TIMEOUT_MS</code> &mdash; default <code>1500</code></li>
+      <li><code>LOCAL_AI_PULL_TIMEOUT_MS</code> &mdash; default <code>3600000</code> (1 hour)</li>
+    </ul>
 
     <footer>
       <a href="https://github.com/TMHSDigital/local-ai-mcp">View on GitHub</a>

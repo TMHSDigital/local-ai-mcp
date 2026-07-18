@@ -32,6 +32,12 @@ export interface CompletionParams {
   stop?: string[];
 }
 
+/** Incremental token/text callback for streamed completions. */
+export type CompletionChunkHandler = (chunk: {
+  text: string;
+  done: boolean;
+}) => void | Promise<void>;
+
 export interface CompletionResult {
   provider: ProviderId;
   model: string;
@@ -39,6 +45,8 @@ export interface CompletionResult {
   promptTokens?: number;
   completionTokens?: number;
   totalDurationMs?: number;
+  /** True when the provider used SSE streaming to assemble the result. */
+  streamed?: boolean;
 }
 
 export interface EmbedParams {
@@ -101,6 +109,10 @@ export interface Provider {
     model: string,
     timeoutMs: number,
   ): Promise<{ provider: ProviderId; model: string; unloaded: boolean; detail?: string }>;
-  complete(params: CompletionParams, timeoutMs: number): Promise<CompletionResult>;
+  complete(
+    params: CompletionParams,
+    timeoutMs: number,
+    onChunk?: CompletionChunkHandler,
+  ): Promise<CompletionResult>;
   embed(params: EmbedParams, timeoutMs: number): Promise<EmbedResult>;
 }

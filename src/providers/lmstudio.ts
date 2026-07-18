@@ -1,6 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { httpJson, probe } from "../http.js";
+import { openAiChatComplete } from "./openai-complete.js";
 import type {
+  CompletionChunkHandler,
   CompletionParams,
   CompletionResult,
   EmbedParams,
@@ -42,11 +44,6 @@ interface LMStudioModel {
   quantization?: string;
   max_context_length?: number;
   loaded_context_length?: number;
-}
-
-interface OpenAiChatResponse {
-  choices?: Array<{ message?: { content?: string } }>;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
 interface OpenAiEmbedResponse {
@@ -211,29 +208,18 @@ export class LMStudioProvider implements Provider {
     return { provider: PROVIDER, model, unloaded: true };
   }
 
-  async complete(params: CompletionParams, timeoutMs: number): Promise<CompletionResult> {
-    const messages =
-      params.messages ?? [{ role: "user", content: params.prompt ?? "" }];
-    const start = Date.now();
-    const data = await httpJson<OpenAiChatResponse>(`${this.host}/v1/chat/completions`, {
-      method: "POST",
-      body: JSON.stringify({
-        model: params.model,
-        messages,
-        max_tokens: params.maxTokens,
-        temperature: params.temperature,
-        stop: params.stop,
-      }),
+  async complete(
+    params: CompletionParams,
+    timeoutMs: number,
+    onChunk?: CompletionChunkHandler,
+  ): Promise<CompletionResult> {
+    return openAiChatComplete(
+      `${this.host}/v1/chat/completions`,
+      PROVIDER,
+      params,
       timeoutMs,
-    });
-    return {
-      provider: PROVIDER,
-      model: params.model,
-      text: data.choices?.[0]?.message?.content ?? "",
-      promptTokens: data.usage?.prompt_tokens,
-      completionTokens: data.usage?.completion_tokens,
-      totalDurationMs: Date.now() - start,
-    };
+      { onChunk },
+    );
   }
 
   async embed(params: EmbedParams, timeoutMs: number): Promise<EmbedResult> {

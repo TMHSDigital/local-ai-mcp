@@ -116,12 +116,14 @@
   },
   {
     "name": "fit_check",
-    "description": "Determine whether a model fits on the local hardware. Resolves the model size from the provider or the static catalog (or an explicit sizeBytes), then compares against free GPU VRAM, falling back to system RAM. Returns fits, target (gpu/cpu/none), required and available bytes.",
+    "description": "Determine whether a model fits on the local hardware. Resolves the model weight size from the provider or the static catalog (or an explicit sizeBytes), estimates KV-cache overhead for a context length (default 4096), then compares weight+KV against free GPU VRAM, falling back to system RAM. Returns fits, target (gpu/cpu/none), weight/kv/required/available bytes.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "model": { "type": "string", "description": "Model id/name to check" },
-        "sizeBytes": { "type": "number", "description": "Optional explicit model size in bytes (overrides lookup)" },
+        "sizeBytes": { "type": "number", "description": "Optional explicit model weight size in bytes (overrides lookup)" },
+        "contextLength": { "type": "number", "description": "Context length for KV-cache estimate (default 4096)" },
+        "parameterSize": { "type": "string", "description": "Optional parameter size like \"7B\" or \"3.8B\" for KV estimate (overrides lookup)" },
         "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot"], "description": "Optional provider id" }
       },
       "required": ["model"]
@@ -165,7 +167,7 @@
   },
   {
     "name": "complete",
-    "description": "DELEGATED INFERENCE: Offload a text/chat completion to a local model runtime for cost savings and privacy (data never leaves the machine). This is NOT a chat feature for the user; it delegates work to a local LLM. Provide either prompt or messages. Without a provider arg, uses the first detected provider.",
+    "description": "DELEGATED INFERENCE: Offload a text/chat completion to a local model runtime for cost savings and privacy (data never leaves the machine). This is NOT a chat feature for the user; it delegates work to a local LLM. Provide either prompt or messages. Streams tokens via MCP progress notifications when the client supplies a progressToken (stream defaults to true). Without a provider arg, uses the first detected provider.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -186,6 +188,7 @@
         "maxTokens": { "type": "number", "description": "Maximum tokens to generate" },
         "temperature": { "type": "number", "description": "Sampling temperature" },
         "stop": { "type": "array", "items": { "type": "string" }, "description": "Stop sequences" },
+        "stream": { "type": "boolean", "description": "Stream tokens from the provider (default true). Progress notifications are sent when the client provides a progressToken." },
         "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot"], "description": "Optional provider id" }
       },
       "required": ["model"]

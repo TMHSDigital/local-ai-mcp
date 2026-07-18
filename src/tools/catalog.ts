@@ -38,7 +38,9 @@ export function register(server: McpServer, ctx: ToolContext): void {
         const resources = await hardware.getSystemResources();
         const ranked = CATALOG.map((m) => {
           const taskMatch = m.tasks.includes(task);
-          const fit = computeFit(resources, m.approxSizeBytes);
+          const fit = computeFit(resources, m.approxSizeBytes, {
+            parameterSize: m.parameterSize,
+          });
           return {
             name: m.name,
             family: m.family,
@@ -49,6 +51,9 @@ export function register(server: McpServer, ctx: ToolContext): void {
             taskMatch,
             fits: fit.fits,
             fitTarget: fit.target,
+            weightBytes: fit.weightBytes,
+            kvCacheBytes: fit.kvCacheBytes,
+            contextLength: fit.contextLength,
           };
         })
           .sort((a, b) => {

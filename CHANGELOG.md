@@ -7,6 +7,25 @@ tags that version and publishes it.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-18
+
+### Added
+
+- Streaming delegated `complete`: providers request OpenAI-compatible SSE
+  when streaming is enabled (default). Token deltas are forwarded as MCP
+  `notifications/progress` when the client supplies a `progressToken`.
+  Pass `stream: false` for a single non-streamed response.
+- KV-cache-aware `fit_check`: estimates context overhead from parameter size
+  and an optional `contextLength` (default 4096), returning weight/kv/required
+  bytes in the result. `suggest_model` uses the same estimate.
+- Docs site catch-up: Moonshot adapter row, full environment variable list,
+  streaming/`fit_check` descriptions.
+
+### Changed
+
+- Shared OpenAI-compatible completion helper used by Ollama, LM Studio, and
+  Moonshot adapters.
+
 ## [0.2.1] - 2026-07-18
 
 ### Changed
