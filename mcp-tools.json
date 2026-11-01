@@ -1,216 +1,1111 @@
 [
   {
     "name": "list_providers",
-    "description": "List the configured model runtime providers (Ollama, LM Studio, llama.cpp, optional OpenAI-compat / Moonshot) with their host, whether they are detected/live, and their capabilities. Optionally filter to a single provider.",
+    "title": "List providers",
+    "description": "List configured model runtimes (Ollama, LM Studio, llama.cpp, Docker Model Runner, and any opt-in MLX / vLLM / Foundry Local / OpenAI-compatible / hosted instances) with host, kind (local or hosted), live status, and capabilities.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot", "openaicompat", "llamacpp"], "description": "Optional provider id to filter to" }
+        "provider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "lmstudio",
+            "llamacpp",
+            "dockermodelrunner"
+          ],
+          "description": "Provider instance name. Omit to let the server choose (local providers only, unless LOCAL_AI_ALLOW_HOSTED_FALLBACK is set)."
+        }
       },
-      "required": []
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "list_models",
-    "description": "List models installed/available on each detected provider. Without a provider arg, aggregates across all detected providers keyed by provider.",
+    "title": "List installed models",
+    "description": "List models installed/available on each live provider, keyed by provider. Pass provider to query just one.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot", "openaicompat", "llamacpp"], "description": "Optional provider id" }
+        "provider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "lmstudio",
+            "llamacpp",
+            "dockermodelrunner"
+          ],
+          "description": "Provider instance name. Omit to let the server choose (local providers only, unless LOCAL_AI_ALLOW_HOSTED_FALLBACK is set)."
+        }
       },
-      "required": []
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "list_loaded",
-    "description": "List models currently loaded into memory on each detected provider. Without a provider arg, aggregates across all detected providers keyed by provider.",
+    "title": "List loaded models",
+    "description": "List models currently loaded into memory on each live provider, with VRAM use and context length where the runtime reports them.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot", "openaicompat", "llamacpp"], "description": "Optional provider id" }
+        "provider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "lmstudio",
+            "llamacpp",
+            "dockermodelrunner"
+          ],
+          "description": "Provider instance name. Omit to let the server choose (local providers only, unless LOCAL_AI_ALLOW_HOSTED_FALLBACK is set)."
+        }
       },
-      "required": []
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "model_info",
-    "description": "Show detailed metadata for a specific model (family, parameter size, quantization, context length). Without a provider arg, queries all detected providers.",
+    "title": "Model info",
+    "description": "Detailed metadata for one model (family, parameter size, quantization, context length, and layer architecture where available). Without provider, queries the live local providers that have the model.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "model": { "type": "string", "description": "Model id/name to inspect" },
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot", "openaicompat", "llamacpp"], "description": "Optional provider id" }
+        "model": {
+          "type": "string",
+          "description": "Model id/name to inspect"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "lmstudio",
+            "llamacpp",
+            "dockermodelrunner"
+          ],
+          "description": "Provider instance name. Omit to let the server choose (local providers only, unless LOCAL_AI_ALLOW_HOSTED_FALLBACK is set)."
+        }
       },
-      "required": ["model"]
+      "required": [
+        "model"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "pull_model",
-    "description": "HEAVY: Download/pull a model onto a provider. WARNING: this may download multiple gigabytes and can take a long time. Without a provider arg, attempts the pull on every detected provider.",
+    "title": "Pull model",
+    "description": "HEAVY: Download a model onto ONE provider (multiple GB, can take a long time). Streams download progress via MCP progress notifications when the client sends a progressToken. Without provider, uses the provider that already has the model, else the first live local provider that can pull.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "model": { "type": "string", "description": "Model id/name to pull (download)" },
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot", "openaicompat", "llamacpp"], "description": "Optional provider id" }
+        "model": {
+          "type": "string",
+          "description": "Model id/name to pull (e.g. qwen3:8b, hf.co/<repo>:<quant>)"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "lmstudio",
+            "llamacpp",
+            "dockermodelrunner"
+          ],
+          "description": "Provider instance name. Omit to let the server choose (local providers only, unless LOCAL_AI_ALLOW_HOSTED_FALLBACK is set)."
+        }
       },
-      "required": ["model"]
+      "required": [
+        "model"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true
     }
   },
   {
     "name": "remove_model",
-    "description": "DESTRUCTIVE: Permanently delete a model from a provider. Requires confirm:true; without it the action is refused. The provider argument is required so a delete cannot fan out across every detected runtime.",
+    "title": "Remove model",
+    "description": "DESTRUCTIVE: Permanently delete a model from one provider. provider is REQUIRED (no fan-out). If the client supports elicitation the user is asked to confirm directly; otherwise confirm:true is required.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "model": { "type": "string", "description": "Model id/name to remove" },
-        "confirm": { "type": "boolean", "description": "Must be true to perform this destructive deletion" },
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot", "openaicompat", "llamacpp"], "description": "Required provider id (delete is scoped to a single provider)" }
+        "model": {
+          "type": "string",
+          "description": "Model id/name to remove"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "lmstudio",
+            "llamacpp",
+            "dockermodelrunner"
+          ],
+          "description": "Provider to delete from (required). Omit to let the server choose (local providers only, unless LOCAL_AI_ALLOW_HOSTED_FALLBACK is set)."
+        },
+        "confirm": {
+          "description": "Must be true when the client cannot ask the user directly (no elicitation support)",
+          "type": "boolean"
+        }
       },
-      "required": ["model", "confirm", "provider"]
+      "required": [
+        "model",
+        "provider"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
     }
   },
   {
     "name": "load_model",
-    "description": "Load a model into memory so it is ready for inference. Optionally set keepAlive (e.g. '5m', '1h'). Without a provider arg, loads on every detected provider.",
+    "title": "Load model",
+    "description": "Load a model into memory on ONE provider so it is ready for inference. Optional keepAlive (e.g. '5m', '1h') and contextLength. Without provider, uses the live local provider that has the model.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "model": { "type": "string", "description": "Model id/name to load" },
-        "keepAlive": { "type": "string", "description": "How long to keep the model resident, e.g. '5m'" },
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot", "openaicompat", "llamacpp"], "description": "Optional provider id" }
+        "model": {
+          "type": "string",
+          "description": "Model id/name to load"
+        },
+        "keepAlive": {
+          "description": "How long to keep the model resident, e.g. '5m'",
+          "type": "string"
+        },
+        "contextLength": {
+          "description": "Context window to load with (Ollama num_ctx, LM Studio --context-length)",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "lmstudio",
+            "llamacpp",
+            "dockermodelrunner"
+          ],
+          "description": "Provider instance name. Omit to let the server choose (local providers only, unless LOCAL_AI_ALLOW_HOSTED_FALLBACK is set)."
+        }
       },
-      "required": ["model"]
+      "required": [
+        "model"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "unload_model",
-    "description": "Unload a model from memory to free VRAM/RAM. Without a provider arg, unloads from every detected provider.",
+    "title": "Unload model",
+    "description": "Unload a model from memory to free VRAM/RAM on ONE provider. Without provider, uses the live local provider that has it loaded.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "model": { "type": "string", "description": "Model id/name to unload" },
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot", "openaicompat", "llamacpp"], "description": "Optional provider id" }
+        "model": {
+          "type": "string",
+          "description": "Model id/name to unload"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "lmstudio",
+            "llamacpp",
+            "dockermodelrunner"
+          ],
+          "description": "Provider instance name. Omit to let the server choose (local providers only, unless LOCAL_AI_ALLOW_HOSTED_FALLBACK is set)."
+        }
       },
-      "required": ["model"]
+      "required": [
+        "model"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "ensure_model",
+    "title": "Ensure model is ready",
+    "description": "Make a model ready in one call: optionally pull it, check it fits current free VRAM, unload other models if needed (evict: 'lru' or 'all'), load it, and verify. Use dryRun:true to get the plan without changing anything.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "Model id/name"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "lmstudio",
+            "llamacpp",
+            "dockermodelrunner"
+          ],
+          "description": "Provider instance name. Omit to let the server choose (local providers only, unless LOCAL_AI_ALLOW_HOSTED_FALLBACK is set)."
+        },
+        "contextLength": {
+          "description": "Context window to fit and load with (default 4096)",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "kvCacheType": {
+          "description": "KV cache precision used for the fit estimate (default f16)",
+          "type": "string",
+          "enum": [
+            "f16",
+            "q8_0",
+            "q4_0"
+          ]
+        },
+        "allowPull": {
+          "description": "Download the model if it is not installed (default false)",
+          "type": "boolean"
+        },
+        "evict": {
+          "description": "Unload other models to make room: none (default), lru (least recently used first), all",
+          "type": "string",
+          "enum": [
+            "none",
+            "lru",
+            "all"
+          ]
+        },
+        "keepAlive": {
+          "description": "Keep-alive for the loaded model, e.g. '30m'",
+          "type": "string"
+        },
+        "dryRun": {
+          "description": "Return the plan only (default false)",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true
     }
   },
   {
     "name": "health_check",
-    "description": "Check whether each provider's local runtime is reachable and report its version. Without a provider arg, checks all configured providers.",
+    "title": "Health check",
+    "description": "Check whether each provider is reachable and report its version (and live metrics such as vLLM KV-cache usage). Without provider, checks every configured provider, including hosted ones.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot", "openaicompat", "llamacpp"], "description": "Optional provider id" }
+        "provider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "lmstudio",
+            "llamacpp",
+            "dockermodelrunner"
+          ],
+          "description": "Provider instance name. Omit to let the server choose (local providers only, unless LOCAL_AI_ALLOW_HOSTED_FALLBACK is set)."
+        }
       },
-      "required": []
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true
     }
   },
   {
     "name": "system_resources",
-    "description": "Report local hardware resources: platform, total/free RAM, CPU count, and detected GPUs with VRAM. Used to reason about which models can run locally.",
+    "title": "System resources",
+    "description": "Report local hardware: platform, total/available RAM, CPU count, and GPUs with total/free VRAM (NVIDIA via nvidia-smi, AMD/Intel via sysfs or the Windows registry, Apple Silicon unified memory). Each GPU names its data source.",
     "inputSchema": {
       "type": "object",
       "properties": {},
-      "required": []
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "fit_check",
-    "description": "Determine whether a model fits on the local hardware. Resolves the model weight size from the provider or the static catalog (or an explicit sizeBytes), estimates KV-cache overhead for a context length (default 4096), then compares weight+KV against free GPU VRAM, falling back to system RAM. Returns fits, target (gpu/cpu/none), weight/kv/required/available bytes.",
+    "title": "Fit check",
+    "description": "Will a model run on this machine, and where? Uses the installed model's size and exact layer architecture when the runtime exposes it (else parameter-count or catalog estimates) to size weights + KV cache for a context length, then compares with free VRAM summed across GPUs and available RAM. Returns target gpu / partial (GPU+CPU split) / cpu / none, with the numbers and how the KV estimate was made. Credits back memory the model already uses if it is loaded.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "model": { "type": "string", "description": "Model id/name to check" },
-        "sizeBytes": { "type": "number", "description": "Optional explicit model weight size in bytes (overrides lookup)" },
-        "contextLength": { "type": "number", "description": "Context length for KV-cache estimate (default 4096)" },
-        "parameterSize": { "type": "string", "description": "Optional parameter size like \"7B\" or \"3.8B\" for KV estimate (overrides lookup)" },
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot", "openaicompat", "llamacpp"], "description": "Optional provider id" }
+        "model": {
+          "type": "string",
+          "description": "Model id/name to check"
+        },
+        "sizeBytes": {
+          "description": "Explicit weight size in bytes (overrides lookup)",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "contextLength": {
+          "description": "Context length for the KV-cache estimate (default 4096)",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "parameterSize": {
+          "description": "Parameter size like \"7B\" (overrides lookup)",
+          "type": "string"
+        },
+        "kvCacheType": {
+          "description": "KV cache precision: f16 (default), q8_0, q4_0",
+          "type": "string",
+          "enum": [
+            "f16",
+            "q8_0",
+            "q4_0"
+          ]
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "lmstudio",
+            "llamacpp",
+            "dockermodelrunner"
+          ],
+          "description": "Provider instance name. Omit to let the server choose (local providers only, unless LOCAL_AI_ALLOW_HOSTED_FALLBACK is set)."
+        }
       },
-      "required": ["model"]
+      "required": [
+        "model"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "benchmark",
-    "description": "HEAVY: Runs REAL inference. Executes one small completion against a loaded/loadable model and measures latency (ms) and throughput (tokens/sec). This consumes compute and may load the model. Without a provider arg, runs on the first detected provider.",
+    "title": "Benchmark",
+    "description": "HEAVY: Runs REAL inference. Measures a model on this machine with a warmup (absorbs load time) plus N streamed runs: time-to-first-token, generation tokens/sec (runtime-reported when available, else measured after the first token), and prompt-processing speed. Pass models[] to compare several models with the same prompt, ranked by generation speed.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "model": { "type": "string", "description": "Model id/name to benchmark" },
-        "prompt": { "type": "string", "description": "Optional prompt; a short default is used otherwise" },
-        "maxTokens": { "type": "number", "description": "Max tokens to generate (default 64)" },
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot", "openaicompat", "llamacpp"], "description": "Optional provider id" }
+        "model": {
+          "description": "Model id/name to benchmark",
+          "type": "string"
+        },
+        "models": {
+          "description": "Compare several models (ranked by median generation tokens/sec)",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "prompt": {
+          "description": "Prompt (default: a short fixed prompt)",
+          "type": "string"
+        },
+        "maxTokens": {
+          "description": "Tokens to generate per run (default 128)",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "runs": {
+          "description": "Measured runs per model (default 3)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "warmup": {
+          "description": "Run a 1-token warmup first so load time is excluded (default true)",
+          "type": "boolean"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "lmstudio",
+            "llamacpp",
+            "dockermodelrunner"
+          ],
+          "description": "Provider instance name. Omit to let the server choose (local providers only, unless LOCAL_AI_ALLOW_HOSTED_FALLBACK is set)."
+        }
       },
-      "required": ["model"]
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
     }
   },
   {
     "name": "search_available",
-    "description": "Search the built-in catalog of well-known local models by name, family, or task. Note: this searches a curated static catalog, not the full live Ollama library (https://ollama.com/library).",
+    "title": "Search catalog",
+    "description": "Search the built-in curated catalog of well-known local models (Ollama tags) by name, family, or task. Offline and instant. For live results with per-quant fit, use search_models with source 'huggingface'.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "query": { "type": "string", "description": "Search text matched against model name, family, and tasks" }
+        "query": {
+          "type": "string",
+          "description": "Search text matched against model name, family, and tasks"
+        }
       },
-      "required": ["query"]
+      "required": [
+        "query"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "suggest_model",
-    "description": "Recommend local models for a task (chat/code/embed/vision/reasoning/general), ranked by task match and then by whether they fit the detected free GPU VRAM or system RAM. Returns a ranked list with fit flags.",
+    "title": "Suggest model",
+    "description": "Recommend catalog models for a task, ranked for THIS machine: fully-on-GPU first, then partial GPU offload, then CPU-only. Within a tier the largest (most capable) model comes first unless preferSpeed is true. Flags models already installed on a live provider and explains each pick.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "task": { "type": "string", "enum": ["chat", "code", "embed", "vision", "reasoning", "general"], "description": "The task you want a model for" }
+        "task": {
+          "type": "string",
+          "enum": [
+            "chat",
+            "code",
+            "embed",
+            "vision",
+            "reasoning",
+            "general"
+          ],
+          "description": "The task you want a model for"
+        },
+        "contextLength": {
+          "description": "Context length to plan for (default 4096)",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "kvCacheType": {
+          "description": "KV cache precision (default f16)",
+          "type": "string",
+          "enum": [
+            "f16",
+            "q8_0",
+            "q4_0"
+          ]
+        },
+        "preferSpeed": {
+          "description": "Prefer smaller, faster models within each tier",
+          "type": "boolean"
+        }
       },
-      "required": ["task"]
+      "required": [
+        "task"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "search_models",
+    "title": "Search models (live)",
+    "description": "Find models to download, annotated with whether each fits this machine. source 'huggingface' searches GGUF repos on the Hugging Face Hub and returns per-quant sizes, the best quant for this hardware, and pullable references (Ollama: hf.co/<repo>:<quant>). source 'catalog' searches the offline curated list. The Ollama library has no public search API, so it is not a source.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search text, e.g. 'qwen coder' or 'gemma 3'"
+        },
+        "source": {
+          "description": "Default huggingface",
+          "type": "string",
+          "enum": [
+            "huggingface",
+            "catalog"
+          ]
+        },
+        "task": {
+          "description": "Catalog source only: filter by task",
+          "type": "string",
+          "enum": [
+            "chat",
+            "code",
+            "embed",
+            "vision",
+            "reasoning",
+            "general"
+          ]
+        },
+        "fitsOnly": {
+          "description": "Only return results with a quant that fits",
+          "type": "boolean"
+        },
+        "contextLength": {
+          "description": "Context length for fit (default 4096)",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "limit": {
+          "description": "Max repos (default 8)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true
     }
   },
   {
     "name": "complete",
-    "description": "DELEGATED INFERENCE: Offload a text/chat completion to a local model runtime for cost savings and privacy (data never leaves the machine). This is NOT a chat feature for the user; it delegates work to a local LLM. Provide either prompt or messages. Streams tokens via MCP progress notifications when the client supplies a progressToken (stream defaults to true). Without a provider arg, uses the first detected provider.",
+    "title": "Delegated completion",
+    "description": "DELEGATED INFERENCE: Offload a completion to a model you choose for cost savings and privacy. Without provider, runs on the live LOCAL provider that has the model (never a hosted API unless LOCAL_AI_ALLOW_HOSTED_FALLBACK is set); the result's 'provider', 'host' and 'local' fields say where it ran. Supports system prompts, JSON / JSON-Schema output (validated 'parsed' field), seed/topP/topK, image inputs for vision models, and contextLength for long inputs. Streams tokens via MCP progress notifications when the client sends a progressToken.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "model": { "type": "string", "description": "Model id/name to run the completion on" },
-        "prompt": { "type": "string", "description": "Plain prompt text (alternative to messages)" },
+        "model": {
+          "type": "string",
+          "description": "Model id/name to run the completion on"
+        },
+        "prompt": {
+          "description": "Plain prompt text (alternative to messages)",
+          "type": "string"
+        },
+        "system": {
+          "description": "System instruction",
+          "type": "string"
+        },
         "messages": {
+          "description": "Chat messages; content may be a string or text/image parts (vision models)",
           "type": "array",
-          "description": "Chat-style messages (alternative to prompt)",
           "items": {
             "type": "object",
             "properties": {
-              "role": { "type": "string" },
-              "content": { "type": "string" }
+              "role": {
+                "type": "string"
+              },
+              "content": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "text"
+                            },
+                            "text": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "text"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "image"
+                            },
+                            "data": {
+                              "description": "Base64 image data (no data: prefix)",
+                              "type": "string"
+                            },
+                            "mimeType": {
+                              "type": "string"
+                            },
+                            "url": {
+                              "description": "Image URL or data: URL",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
             },
-            "required": ["role", "content"]
+            "required": [
+              "role",
+              "content"
+            ]
           }
         },
-        "maxTokens": { "type": "number", "description": "Maximum tokens to generate" },
-        "temperature": { "type": "number", "description": "Sampling temperature" },
-        "stop": { "type": "array", "items": { "type": "string" }, "description": "Stop sequences" },
-        "stream": { "type": "boolean", "description": "Stream tokens from the provider (default true). Progress notifications are sent when the client provides a progressToken." },
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot", "openaicompat", "llamacpp"], "description": "Optional provider id" }
+        "maxTokens": {
+          "description": "Maximum tokens to generate",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "temperature": {
+          "description": "Sampling temperature",
+          "type": "number"
+        },
+        "topP": {
+          "type": "number"
+        },
+        "topK": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "seed": {
+          "description": "Seed for reproducible sampling",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "repeatPenalty": {
+          "type": "number"
+        },
+        "stop": {
+          "description": "Stop sequences",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "contextLength": {
+          "description": "Context window to run with (Ollama num_ctx). Raise it for long inputs to avoid truncation.",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "responseFormat": {
+          "description": "Constrain output to JSON (json_object) or a JSON Schema (json_schema); the result includes a validated 'parsed' value",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "json_object"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "json_schema"
+                },
+                "schema": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {},
+                  "description": "JSON Schema the output must satisfy"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "schema"
+              ]
+            }
+          ]
+        },
+        "options": {
+          "description": "Provider-specific extras passed through as-is",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "stream": {
+          "description": "Stream tokens (default true). Progress notifications are sent when the client provides a progressToken.",
+          "type": "boolean"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "lmstudio",
+            "llamacpp",
+            "dockermodelrunner"
+          ],
+          "description": "Provider instance name. Omit to let the server choose (local providers only, unless LOCAL_AI_ALLOW_HOSTED_FALLBACK is set)."
+        }
       },
-      "required": ["model"]
+      "required": [
+        "model"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
     }
   },
   {
     "name": "embed",
-    "description": "DELEGATED EMBEDDINGS: Offload embedding generation to a local model runtime for cost savings and privacy. Accepts a single string or an array of strings. Without a provider arg, uses the first detected provider.",
+    "title": "Delegated embeddings",
+    "description": "DELEGATED EMBEDDINGS: Generate embeddings for a string or an array of texts. Without provider, runs on the live local provider that has the model. Always returns one vector per input.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "model": { "type": "string", "description": "Embedding model id/name" },
+        "model": {
+          "type": "string",
+          "description": "Embedding model id/name"
+        },
         "input": {
-          "description": "Text or array of texts to embed",
-          "oneOf": [
-            { "type": "string" },
-            { "type": "array", "items": { "type": "string" } }
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "Text or array of texts to embed"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "lmstudio",
+            "llamacpp",
+            "dockermodelrunner"
+          ],
+          "description": "Provider instance name. Omit to let the server choose (local providers only, unless LOCAL_AI_ALLOW_HOSTED_FALLBACK is set)."
+        }
+      },
+      "required": [
+        "model",
+        "input"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "delegate",
+    "title": "Delegate a task to the best local model",
+    "description": "ONE CALL to offload work locally: pick the best model for a task on THIS machine, make it ready, and run it. Prefers models already loaded (no load cost), then installed models that fit your free VRAM, then (with allowPull) the best catalog model that fits. Task specialists (coder, vision, reasoning) win over general models; larger fitting models win over smaller. Never uses a hosted provider unless allowHosted is true. Returns the completion plus a 'routing' block explaining the choice.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "task": {
+          "type": "string",
+          "enum": [
+            "chat",
+            "code",
+            "summarize",
+            "extract",
+            "reasoning",
+            "vision",
+            "general"
+          ],
+          "description": "What kind of work this is"
+        },
+        "prompt": {
+          "description": "Plain prompt text (alternative to messages)",
+          "type": "string"
+        },
+        "system": {
+          "description": "System instruction",
+          "type": "string"
+        },
+        "messages": {
+          "description": "Chat messages; content may be a string or text/image parts (vision models)",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string"
+              },
+              "content": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "text"
+                            },
+                            "text": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "text"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "image"
+                            },
+                            "data": {
+                              "description": "Base64 image data (no data: prefix)",
+                              "type": "string"
+                            },
+                            "mimeType": {
+                              "type": "string"
+                            },
+                            "url": {
+                              "description": "Image URL or data: URL",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            "required": [
+              "role",
+              "content"
+            ]
+          }
+        },
+        "maxTokens": {
+          "description": "Maximum tokens to generate",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "temperature": {
+          "description": "Sampling temperature",
+          "type": "number"
+        },
+        "topP": {
+          "type": "number"
+        },
+        "topK": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "seed": {
+          "description": "Seed for reproducible sampling",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "repeatPenalty": {
+          "type": "number"
+        },
+        "stop": {
+          "description": "Stop sequences",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "contextLength": {
+          "description": "Context window to run with (Ollama num_ctx). Raise it for long inputs to avoid truncation.",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "responseFormat": {
+          "description": "Constrain output to JSON (json_object) or a JSON Schema (json_schema); the result includes a validated 'parsed' value",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "json_object"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "json_schema"
+                },
+                "schema": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {},
+                  "description": "JSON Schema the output must satisfy"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "schema"
+              ]
+            }
           ]
         },
-        "provider": { "type": "string", "enum": ["ollama", "lmstudio", "moonshot", "openaicompat", "llamacpp"], "description": "Optional provider id" }
+        "options": {
+          "description": "Provider-specific extras passed through as-is",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "stream": {
+          "description": "Stream tokens (default true). Progress notifications are sent when the client provides a progressToken.",
+          "type": "boolean"
+        },
+        "allowPull": {
+          "description": "Download a catalog model if nothing suitable is installed (default false)",
+          "type": "boolean"
+        },
+        "allowHosted": {
+          "description": "Allow hosted providers (default false)",
+          "type": "boolean"
+        },
+        "maxSizeBytes": {
+          "description": "Ignore models larger than this",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "lmstudio",
+            "llamacpp",
+            "dockermodelrunner"
+          ],
+          "description": "Restrict to one provider. Omit to let the server choose (local providers only, unless LOCAL_AI_ALLOW_HOSTED_FALLBACK is set)."
+        }
       },
-      "required": ["model", "input"]
+      "required": [
+        "task"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true
     }
   }
 ]

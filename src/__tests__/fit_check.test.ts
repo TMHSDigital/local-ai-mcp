@@ -1,118 +1,127 @@
 import { describe, expect, it } from "vitest";
-import type { HardwareProbe, SystemResources } from "../hardware/index.js";
-import { computeFit, estimateKvCacheBytes, parseParameterBillions } from "../tools/helpers.js";
+import { computeFit, estimateKvCacheBytes, parseParameterBillions } from "../fit.js";
+import { GB, resources } from "./support.js";
 
-const GB = 1024 * 1024 * 1024;
+const KiB = 1024;
+const MiB = 1024 * 1024;
 
-function probe(resources: SystemResources): HardwareProbe {
-  return { async getSystemResources() { return resources; } };
-}
+const LLAMA31_8B = { layers: 32, kvHeads: 8, keyLength: 128, valueLength: 128 };
+const QWEN25_7B = { layers: 28, kvHeads: 4, keyLength: 128, valueLength: 128 };
+const LLAMA31_70B = { layers: 80, kvHeads: 8, keyLength: 128, valueLength: 128 };
 
 describe("parseParameterBillions", () => {
-  it("parses B and M suffixes", () => {
-    expect(parseParameterBillions("7B")).toBe(7);
-    expect(parseParameterBillions("3.8B")).toBe(3.8);
-    expect(parseParameterBillions("137M")).toBeCloseTo(0.137);
-    expect(parseParameterBillions("bogus")).toBeUndefined();
-  });
+  it.each([
+    ["7B", 7],
+    ["3.8B", 3.8],
+    ["137M", 0.137],
+    ["huge", undefined],
+    [undefined, undefined],
+  ])("%s", (s, v) => expect(parseParameterBillions(s)).toBe(v));
 });
 
 describe("estimateKvCacheBytes", () => {
-  it("scales with context and parameter size", () => {
-    const a = estimateKvCacheBytes(5 * GB, { parameterSize: "7B", contextLength: 4096 });
-    const b = estimateKvCacheBytes(5 * GB, { parameterSize: "7B", contextLength: 8192 });
-    expect(a.kvCacheBytes).toBe(7 * 4 * 1024 * 1024); // 7B * 4K/1K * 1MiB
-    expect(b.kvCacheBytes).toBe(a.kvCacheBytes * 2);
+  it("is exact from architecture: Llama 3.1 8B = 128 KiB/token fp16", () => {
+    const r = estimateKvCacheBytes(0, { architecture: LLAMA31_8B, contextLength: 1024 });
+    expect(r.method).toBe("architecture");
+    expect(r.kvCacheBytes).toBe(128 * MiB);
+    expect(estimateKvCacheBytes(0, { architecture: LLAMA31_8B, contextLength: 32768 }).kvCacheBytes).toBe(4 * 1024 * MiB);
   });
 
-  it("falls back to 15% of weight when parameter size unknown", () => {
-    const out = estimateKvCacheBytes(10 * GB, { contextLength: 2048 });
-    expect(out.kvCacheBytes).toBe(Math.round(10 * GB * 0.15));
+  it("matches known models within 10%", () => {
+    // Qwen2.5 7B: 2*28*4*128*2 = 56 KiB/token; Llama 3.1 70B: 320 KiB/token
+    expect(estimateKvCacheBytes(0, { architecture: QWEN25_7B, contextLength: 1 }).kvCacheBytes).toBe(56 * KiB);
+    expect(estimateKvCacheBytes(0, { architecture: LLAMA31_70B, contextLength: 1 }).kvCacheBytes).toBe(320 * KiB);
+  });
+
+  it("scales with KV quantization", () => {
+    const f16 = estimateKvCacheBytes(0, { architecture: LLAMA31_8B }).kvCacheBytes;
+    const q8 = estimateKvCacheBytes(0, { architecture: LLAMA31_8B, kvCacheType: "q8_0" }).kvCacheBytes;
+    const q4 = estimateKvCacheBytes(0, { architecture: LLAMA31_8B, kvCacheType: "q4_0" }).kvCacheBytes;
+    expect(q8 / f16).toBeCloseTo(34 / 64, 3);
+    expect(q4 / f16).toBeCloseTo(18 / 64, 3);
+  });
+
+  it("parameter heuristic lands near real GQA models (not 16x low)", () => {
+    const perToken = (b: string) => estimateKvCacheBytes(0, { parameterSize: b, contextLength: 1 }).kvCacheBytes / KiB;
+    // Real: 8B ~128 KiB, 70B ~320 KiB, 1B ~32 KiB. Heuristic should be within ~0.6x-2x.
+    expect(perToken("8B")).toBeGreaterThan(128 * 0.8);
+    expect(perToken("8B")).toBeLessThan(128 * 1.5);
+    expect(perToken("70B")).toBeGreaterThan(320);
+    expect(perToken("70B")).toBeLessThan(320 * 2);
+    expect(perToken("1B")).toBeGreaterThan(32 * 0.8);
+  });
+
+  it("weight-ratio fallback scales with context", () => {
+    const a = estimateKvCacheBytes(10 * GB, { contextLength: 4096 });
+    const b = estimateKvCacheBytes(10 * GB, { contextLength: 8192 });
+    expect(a.method).toBe("weight-ratio");
+    expect(b.kvCacheBytes).toBe(a.kvCacheBytes * 2);
   });
 });
 
 describe("computeFit", () => {
-  it("fits on GPU when VRAM is ample", () => {
-    const resources: SystemResources = {
-      platform: "linux",
-      ramTotalBytes: 32 * GB,
-      ramFreeBytes: 16 * GB,
-      cpuCount: 8,
-      gpus: [{ name: "RTX 4090", vramTotalBytes: 24 * GB, vramFreeBytes: 20 * GB }],
-    };
-    const out = computeFit(resources, 5 * GB, { parameterSize: "7B", contextLength: 4096 });
-    expect(out.fits).toBe(true);
-    expect(out.target).toBe("gpu");
-    expect(out.weightBytes).toBe(5 * GB);
-    expect(out.kvCacheBytes).toBeGreaterThan(0);
-    expect(out.requiredBytes).toBe(out.weightBytes + out.kvCacheBytes);
-    expect(out.contextLength).toBe(4096);
-  });
-
-  it("falls back to CPU/RAM when no GPU present", () => {
-    const resources: SystemResources = {
-      platform: "linux",
-      ramTotalBytes: 32 * GB,
-      ramFreeBytes: 24 * GB,
-      cpuCount: 8,
-      gpus: [],
-    };
-    const out = computeFit(resources, 5 * GB);
-    expect(out.fits).toBe(true);
-    expect(out.target).toBe("cpu");
-  });
-
-  it("falls back to CPU when GPU VRAM is too small but RAM is large", () => {
-    const resources: SystemResources = {
-      platform: "win32",
-      ramTotalBytes: 64 * GB,
-      ramFreeBytes: 40 * GB,
-      cpuCount: 16,
-      gpus: [{ name: "GTX 1650", vramTotalBytes: 4 * GB, vramFreeBytes: 3 * GB }],
-    };
-    const out = computeFit(resources, 8 * GB);
-    expect(out.fits).toBe(true);
-    expect(out.target).toBe("cpu");
-  });
-
-  it("returns fits:false/target:none when neither has room", () => {
-    const resources: SystemResources = {
-      platform: "linux",
-      ramTotalBytes: 8 * GB,
-      ramFreeBytes: 2 * GB,
-      cpuCount: 4,
-      gpus: [{ name: "GTX 1650", vramTotalBytes: 4 * GB, vramFreeBytes: 1 * GB }],
-    };
-    const out = computeFit(resources, 8 * GB);
-    expect(out.fits).toBe(false);
-    expect(out.target).toBe("none");
-  });
-
-  it("larger context can push a borderline model off GPU", () => {
-    const resources: SystemResources = {
-      platform: "linux",
-      ramTotalBytes: 64 * GB,
-      ramFreeBytes: 48 * GB,
-      cpuCount: 8,
-      // ~6.2 GB free: 5GB + small KV fits with headroom; 70B@32k KV (~2.2GB) does not
-      gpus: [{ name: "mid", vramTotalBytes: 8 * GB, vramFreeBytes: Math.round(6.2 * GB) }],
-    };
-    const low = computeFit(resources, 5 * GB, { parameterSize: "7B", contextLength: 2048 });
-    const high = computeFit(resources, 5 * GB, { parameterSize: "70B", contextLength: 32768 });
-    expect(low.target).toBe("gpu");
-    expect(high.target).not.toBe("gpu");
-  });
-
-  it("stubbed HardwareProbe is honored end-to-end", async () => {
-    const hw = probe({
-      platform: "linux",
-      ramTotalBytes: 16 * GB,
-      ramFreeBytes: 10 * GB,
-      cpuCount: 8,
-      gpus: [{ name: "RTX 3060", vramTotalBytes: 12 * GB, vramFreeBytes: 10 * GB }],
+  it("fits on GPU with headroom", () => {
+    const out = computeFit(resources({ gpus: [{ name: "4090", vramFreeBytes: 22 * GB, source: "t" }] }), 5 * GB, {
+      architecture: LLAMA31_8B,
     });
-    const res = await hw.getSystemResources();
-    const out = computeFit(res, 4 * GB);
-    expect(out.target).toBe("gpu");
+    expect(out).toMatchObject({ fits: true, target: "gpu", kvEstimate: "architecture", gpuCount: 1 });
+    expect(out.requiredBytes).toBe(out.weightBytes + out.kvCacheBytes);
+  });
+
+  it("long context that the old heuristic called a GPU fit no longer does", () => {
+    // 8B Q4 (~4.7 GB) at 128K context: KV alone is 16 GiB.
+    const out = computeFit(resources({ gpus: [{ name: "4090", vramFreeBytes: 22 * GB, source: "t" }] }), 4.7 * GB, {
+      architecture: LLAMA31_8B,
+      contextLength: 131072,
+    });
+    expect(out.target).not.toBe("gpu");
+  });
+
+  it("sums VRAM across GPUs", () => {
+    const two = resources({
+      gpus: [
+        { name: "a", vramFreeBytes: 12 * GB, source: "t" },
+        { name: "b", vramFreeBytes: 12 * GB, source: "t" },
+      ],
+    });
+    const out = computeFit(two, 15 * GB, { parameterSize: "24B" });
+    expect(out).toMatchObject({ target: "gpu", gpuCount: 2 });
+    expect(out.note).toMatch(/split across 2 GPUs/);
+  });
+
+  it("reports partial offload with a GPU fraction", () => {
+    const out = computeFit(resources({ gpus: [{ name: "a", vramFreeBytes: 8 * GB, source: "t" }] }), 12 * GB, {
+      parameterSize: "20B",
+    });
+    expect(out.target).toBe("partial");
+    expect(out.gpuFraction).toBeGreaterThan(0.4);
+    expect(out.gpuFraction).toBeLessThan(0.6);
+  });
+
+  it("treats Apple unified memory as one pool", () => {
+    const mac = resources({
+      platform: "darwin",
+      ramFreeBytes: 20 * GB,
+      gpus: [{ name: "Apple M3", vramTotalBytes: 21 * GB, vramFreeBytes: 16 * GB, unified: true, source: "sysctl" }],
+    });
+    expect(computeFit(mac, 8 * GB, { parameterSize: "14B" })).toMatchObject({ target: "gpu", unifiedMemory: true });
+    // Bigger than the GPU working set but within RAM: partial, judged against RAM only (not GPU+RAM).
+    const big = computeFit(mac, 15 * GB, { parameterSize: "27B" });
+    expect(big.target).toBe("partial");
+    expect(big.availableBytes).toBe(20 * GB);
+    expect(computeFit(mac, 30 * GB, { parameterSize: "70B" }).target).toBe("none");
+  });
+
+  it("credits back memory an already-loaded model uses", () => {
+    const r = resources({ gpus: [{ name: "a", vramFreeBytes: 1 * GB, source: "t" }] });
+    expect(computeFit(r, 5 * GB, { parameterSize: "8B" }).target).not.toBe("gpu");
+    expect(computeFit(r, 5 * GB, { parameterSize: "8B", residentVramBytes: 6 * GB }).target).toBe("gpu");
+  });
+
+  it("falls back to CPU, then none", () => {
+    expect(computeFit(resources(), 5 * GB, { parameterSize: "8B" })).toMatchObject({ target: "cpu" });
+    const out = computeFit(resources({ ramFreeBytes: 2 * GB }), 50 * GB, { parameterSize: "70B" });
+    expect(out).toMatchObject({ fits: false, target: "none" });
+    expect(out.note).toMatch(/smaller quant/);
   });
 });

@@ -1,82 +1,99 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { openAiChatComplete } from "../providers/openai-complete.js";
+import { buildMessages, openAiChatComplete, parseStructured } from "../providers/openai-complete.js";
+import { mockFetch } from "./support.js";
 
-const URL = "http://localhost:11434/v1/chat/completions";
-const TIMEOUT = 5000;
+const TARGET = { url: "http://srv/v1/chat/completions", provider: "srv", host: "http://srv", local: true };
+const OPTS = { timeoutMs: 5000 };
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-  vi.restoreAllMocks();
-});
+afterEach(() => vi.unstubAllGlobals());
 
 describe("openAiChatComplete", () => {
-  it("non-stream path posts without stream:true and returns text", async () => {
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse(init?.body as string);
-      expect(body.stream).toBeUndefined();
-      return {
-        ok: true,
-        status: 200,
-        text: async () =>
-          JSON.stringify({
-            choices: [{ message: { content: "hello" } }],
-            usage: { prompt_tokens: 2, completion_tokens: 1 },
-          }),
-      } as unknown as Response;
+  it("maps parameters, response_format and image parts", async () => {
+    const calls = mockFetch(() => ({ body: { choices: [{ message: { content: "{}" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } } }));
+    await openAiChatComplete(
+      TARGET,
+      {
+        model: "m",
+        system: "sys",
+        messages: [{ role: "user", content: [{ type: "text", text: "see" }, { type: "image", data: "QQ==", mimeType: "image/jpeg" }] }],
+        topP: 0.9,
+        seed: 1,
+        responseFormat: { type: "json_schema", schema: { type: "object" } },
+      },
+      OPTS,
+    );
+    expect(calls[0].body).toEqual({
+      model: "m",
+      messages: [
+        { role: "system", content: "sys" },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "see" },
+            { type: "image_url", image_url: { url: "data:image/jpeg;base64,QQ==" } },
+          ],
+        },
+      ],
+      top_p: 0.9,
+      seed: 1,
+      response_format: { type: "json_schema", json_schema: { name: "response", schema: { type: "object" }, strict: true } },
     });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const result = await openAiChatComplete(URL, "ollama", { model: "m", prompt: "hi" }, TIMEOUT);
-    expect(result.text).toBe("hello");
-    expect(result.streamed).toBe(false);
-    expect(result.completionTokens).toBe(1);
   });
 
-  it("stream path parses SSE deltas and invokes onChunk", async () => {
-    const sse = [
-      'data: {"choices":[{"delta":{"content":"Hel"}}]}',
-      'data: {"choices":[{"delta":{"content":"lo"}}]}',
-      'data: {"choices":[{"delta":{}}],"usage":{"prompt_tokens":1,"completion_tokens":2}}',
-      "data: [DONE]",
-      "",
-    ].join("\n");
+  it("requests usage when streaming and reports it", async () => {
+    const calls = mockFetch(() => ({
+      chunks: [
+        'data: {"choices":[{"delta":{"content":"He"}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"y"}}]}\n\n',
+        'data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2}}\n\n',
+        "data: [DONE]\n\n",
+      ],
+    }));
+    const deltas: string[] = [];
+    const r = await openAiChatComplete(TARGET, { model: "m", prompt: "x" }, { ...OPTS, onChunk: (c) => void deltas.push(c.text) });
+    expect((calls[0].body as Record<string, unknown>).stream_options).toEqual({ include_usage: true });
+    expect(deltas).toEqual(["He", "y", ""]);
+    expect(r).toMatchObject({ text: "Hey", promptTokens: 3, completionTokens: 2, streamed: true });
+    expect(r.usageEstimated).toBeUndefined();
+    expect(r.timings?.ttftMs).toBeTypeOf("number");
+  });
 
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(encoder.encode(sse));
-        controller.close();
-      },
+  it("retries without stream_options when the server rejects it", async () => {
+    let n = 0;
+    const calls = mockFetch(() => {
+      n += 1;
+      return n === 1
+        ? { status: 400, text: "unknown field stream_options" }
+        : { chunks: ['data: {"choices":[{"delta":{"content":"ok"}}]}\n\n', "data: [DONE]\n\n"] };
     });
+    const r = await openAiChatComplete(TARGET, { model: "m", prompt: "x" }, { ...OPTS, onChunk: () => undefined });
+    expect(calls).toHaveLength(2);
+    expect((calls[1].body as Record<string, unknown>).stream_options).toBeUndefined();
+    expect(r).toMatchObject({ text: "ok", usageEstimated: true, completionTokens: 1 });
+  });
 
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse(init?.body as string);
-      expect(body.stream).toBe(true);
-      return {
-        ok: true,
-        status: 200,
-        body: stream,
-        text: async () => "",
-      } as unknown as Response;
-    });
-    vi.stubGlobal("fetch", fetchMock);
+  it("warns that contextLength cannot be applied", async () => {
+    mockFetch(() => ({ body: { choices: [{ message: { content: "x" } }] } }));
+    const r = await openAiChatComplete(TARGET, { model: "m", prompt: "x", contextLength: 9000 }, OPTS);
+    expect(r.applied).toMatchObject({ contextLength: false });
+    expect(r.warnings?.[0]).toMatch(/cannot set the context window/);
+  });
+});
 
-    const chunks: string[] = [];
-    const result = await openAiChatComplete(
-      URL,
-      "ollama",
-      { model: "m", prompt: "hi" },
-      TIMEOUT,
-      {
-        onChunk: async ({ text, done }) => {
-          if (!done && text) chunks.push(text);
-        },
-      },
-    );
+describe("helpers", () => {
+  it("buildMessages adds system only when absent", () => {
+    expect(buildMessages({ model: "m", prompt: "p", system: "s" })).toEqual([
+      { role: "system", content: "s" },
+      { role: "user", content: "p" },
+    ]);
+    expect(buildMessages({ model: "m", system: "s", messages: [{ role: "system", content: "keep" }] })).toEqual([
+      { role: "system", content: "keep" },
+    ]);
+  });
 
-    expect(chunks).toEqual(["Hel", "lo"]);
-    expect(result.text).toBe("Hello");
-    expect(result.streamed).toBe(true);
-    expect(result.completionTokens).toBe(2);
+  it("parseStructured tolerates fenced JSON and reports invalid output", () => {
+    expect(parseStructured('```json\n{"a":1}\n```', true)).toEqual({ parsed: { a: 1 } });
+    expect(parseStructured("not json", true).warning).toMatch(/not valid JSON/);
+    expect(parseStructured("x", false)).toEqual({});
   });
 });

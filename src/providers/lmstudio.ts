@@ -1,39 +1,22 @@
-import { spawnSync } from "node:child_process";
+import { runCommand, type ExecOptions, type ExecResult } from "../exec.js";
 import { httpJson, probe } from "../http.js";
-import { openAiChatComplete } from "./openai-complete.js";
+import { OpenAICompatibleProvider, type ProviderOptions } from "./base.js";
 import type {
-  CompletionChunkHandler,
-  CompletionParams,
-  CompletionResult,
-  EmbedParams,
-  EmbedResult,
   HealthStatus,
+  LifecycleResult,
   LoadedModelInfo,
   ModelDetail,
   ModelSummary,
-  Provider,
   ProviderCapabilities,
+  PullProgressHandler,
   PullResult,
+  RequestOptions,
 } from "./types.js";
 
-const PROVIDER = "lmstudio" as const;
+export type CliResult = ExecResult;
+export type CliRunner = (args: string[], opts: ExecOptions) => Promise<CliResult>;
 
-export interface CliResult {
-  status: number;
-  stdout: string;
-  stderr: string;
-}
-
-export type CliRunner = (args: string[]) => CliResult;
-
-function defaultCliRunner(args: string[]): CliResult {
-  const res = spawnSync("lms", args, { encoding: "utf8" });
-  return {
-    status: res.status ?? (res.error ? 1 : 0),
-    stdout: res.stdout ?? "",
-    stderr: res.stderr ?? (res.error ? String(res.error.message) : ""),
-  };
-}
+const defaultCliRunner: CliRunner = (args, opts) => runCommand("lms", args, opts);
 
 interface LMStudioModel {
   id: string;
@@ -46,25 +29,41 @@ interface LMStudioModel {
   loaded_context_length?: number;
 }
 
-interface OpenAiEmbedResponse {
-  data?: Array<{ embedding: number[] }>;
+/** "5m" / "1h" / "30s" / "90" -> seconds. */
+export function keepAliveToSeconds(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const m = value.trim().match(/^(\d+(?:\.\d+)?)\s*([smhd]?)$/i);
+  if (!m) return undefined;
+  const mult = { "": 1, s: 1, m: 60, h: 3600, d: 86400 }[m[2].toLowerCase() as "" | "s" | "m" | "h" | "d"];
+  return Math.round(Number(m[1]) * mult);
 }
 
-export class LMStudioProvider implements Provider {
-  readonly id = PROVIDER;
-  readonly host: string;
+/** Model ids are passed to the lms CLI; reject anything that could parse as a flag. */
+function assertModelArg(model: string): void {
+  if (!model || model.startsWith("-") || /[\0\r\n]/.test(model)) {
+    throw new Error(`Invalid model id: ${JSON.stringify(model)}`);
+  }
+}
+
+export class LMStudioProvider extends OpenAICompatibleProvider {
+  readonly type = "lmstudio" as const;
   private cliRunner: CliRunner;
   private lmsAvailableCache: boolean | undefined;
 
-  constructor(host: string, cliRunner: CliRunner = defaultCliRunner) {
-    this.host = host;
-    this.cliRunner = cliRunner;
+  constructor(host: string, opts: ProviderOptions & { cliRunner?: CliRunner } = {}) {
+    super(host, opts);
+    this.cliRunner = opts.cliRunner ?? defaultCliRunner;
   }
 
-  lmsAvailable(): boolean {
+  protected override v1(): string {
+    return `${this.host}/v1`;
+  }
+
+  /** Whether the `lms` CLI is on PATH. Cached after the first check. */
+  async lmsAvailable(): Promise<boolean> {
     if (this.lmsAvailableCache === undefined) {
       try {
-        this.lmsAvailableCache = this.cliRunner(["version"]).status === 0;
+        this.lmsAvailableCache = (await this.cliRunner(["version"], { timeoutMs: 5000 })).status === 0;
       } catch {
         this.lmsAvailableCache = false;
       }
@@ -72,168 +71,138 @@ export class LMStudioProvider implements Provider {
     return this.lmsAvailableCache;
   }
 
-  capabilities(): ProviderCapabilities {
-    const cli = this.lmsAvailable();
-    return {
-      provider: PROVIDER,
+  /** Lifecycle capabilities reflect the cached CLI check (warmed by detect()). */
+  override capabilities(): ProviderCapabilities {
+    const cli = this.lmsAvailableCache === true;
+    return this.caps({
       complete: true,
       embed: true,
       pull: cli,
       remove: cli,
       load: cli,
       unload: cli,
-      search: false,
-    };
+      structuredOutput: true,
+    });
   }
 
-  async detect(timeoutMs: number): Promise<boolean> {
-    if (await probe(`${this.host}/api/v0/models`, timeoutMs)) return true;
-    return probe(`${this.host}/v1/models`, timeoutMs);
+  override async detect(opts: RequestOptions): Promise<boolean> {
+    const [rest, openai] = await Promise.all([
+      probe(`${this.host}/api/v0/models`, opts.timeoutMs, { signal: opts.signal }),
+      probe(`${this.host}/v1/models`, opts.timeoutMs, { signal: opts.signal }),
+      this.lmsAvailable(),
+    ]);
+    return rest || openai;
   }
 
-  async health(timeoutMs: number): Promise<HealthStatus> {
-    const live = await this.detect(timeoutMs);
-    return live
-      ? { provider: PROVIDER, live: true, host: this.host }
-      : {
-          provider: PROVIDER,
-          live: false,
-          host: this.host,
-          error: "LM Studio server not reachable",
-        };
+  override async health(opts: RequestOptions): Promise<HealthStatus> {
+    return (await this.detect(opts))
+      ? this.healthy()
+      : this.unhealthy(new Error("LM Studio server not reachable"));
   }
 
-  private mapModel(m: LMStudioModel): ModelSummary {
+  private mapLm(m: LMStudioModel): ModelSummary {
     return {
       id: m.id,
-      provider: PROVIDER,
-      family: m.arch,
-      quantization: m.quantization,
+      provider: this.name,
+      ...(m.arch ? { family: m.arch } : {}),
+      ...(m.quantization ? { quantization: m.quantization } : {}),
+      ...(m.max_context_length ? { contextLength: m.max_context_length } : {}),
     };
   }
 
-  async listModels(timeoutMs: number): Promise<ModelSummary[]> {
-    const data = await httpJson<{ data?: LMStudioModel[] }>(`${this.host}/api/v0/models`, {
-      timeoutMs,
-    });
-    return (data.data ?? []).map((m) => this.mapModel(m));
+  override async listModels(opts: RequestOptions): Promise<ModelSummary[]> {
+    const data = await httpJson<{ data?: LMStudioModel[] }>(`${this.host}/api/v0/models`, opts);
+    return (data.data ?? []).map((m) => this.mapLm(m));
   }
 
-  async listLoaded(timeoutMs: number): Promise<LoadedModelInfo[]> {
-    const data = await httpJson<{ data?: LMStudioModel[] }>(`${this.host}/api/v0/models`, {
-      timeoutMs,
-    });
+  override async listLoaded(opts: RequestOptions): Promise<LoadedModelInfo[]> {
+    const data = await httpJson<{ data?: LMStudioModel[] }>(`${this.host}/api/v0/models`, opts);
     return (data.data ?? [])
       .filter((m) => m.state === "loaded")
       .map((m) => ({
         id: m.id,
-        provider: PROVIDER,
+        provider: this.name,
         contextLength: m.loaded_context_length ?? m.max_context_length,
       }));
   }
 
-  async modelInfo(model: string, timeoutMs: number): Promise<ModelDetail> {
+  override async modelInfo(model: string, opts: RequestOptions): Promise<ModelDetail> {
     const m = await httpJson<LMStudioModel>(
       `${this.host}/api/v0/models/${encodeURIComponent(model)}`,
-      { timeoutMs },
+      opts,
     );
     return {
-      id: m.id ?? model,
-      provider: PROVIDER,
-      family: m.arch,
-      quantization: m.quantization,
-      contextLength: m.max_context_length,
+      ...this.mapLm({ ...m, id: m.id ?? model }),
       details: m as unknown as Record<string, unknown>,
     };
   }
 
-  async pull(model: string, _timeoutMs: number): Promise<PullResult> {
-    if (!this.lmsAvailable()) {
-      throw new Error("LM Studio pull requires the lms CLI");
+  private async lms(args: string[], opts: RequestOptions & { onOutput?: (s: string) => void }): Promise<CliResult> {
+    if (!(await this.lmsAvailable())) {
+      throw new Error(`LM Studio ${args[0]} requires the lms CLI on PATH (https://lmstudio.ai/docs/cli)`);
     }
-    const res = this.cliRunner(["get", model]);
-    if (res.status !== 0) {
-      throw new Error(`lms get failed: ${res.stderr || res.stdout}`);
-    }
-    return { provider: PROVIDER, model, status: "success" };
-  }
-
-  async remove(
-    model: string,
-    _timeoutMs: number,
-  ): Promise<{ provider: typeof PROVIDER; model: string; removed: boolean }> {
-    if (!this.lmsAvailable()) {
-      throw new Error("LM Studio remove requires the lms CLI");
-    }
-    const res = this.cliRunner(["rm", model]);
-    if (res.status !== 0) {
-      throw new Error(`lms rm failed: ${res.stderr || res.stdout}`);
-    }
-    return { provider: PROVIDER, model, removed: true };
-  }
-
-  async load(
-    model: string,
-    _timeoutMs: number,
-    _keepAlive?: string,
-  ): Promise<{ provider: typeof PROVIDER; model: string; loaded: boolean; detail?: string }> {
-    if (this.lmsAvailable()) {
-      const res = this.cliRunner(["load", model]);
-      if (res.status !== 0) {
-        throw new Error(`lms load failed: ${res.stderr || res.stdout}`);
-      }
-      return { provider: PROVIDER, model, loaded: true };
-    }
-    return {
-      provider: PROVIDER,
-      model,
-      loaded: true,
-      detail: "LM Studio loads on first request (JIT); no CLI present",
-    };
-  }
-
-  async unload(
-    model: string,
-    _timeoutMs: number,
-  ): Promise<{ provider: typeof PROVIDER; model: string; unloaded: boolean; detail?: string }> {
-    if (!this.lmsAvailable()) {
-      throw new Error(
-        "LM Studio unload requires the lms CLI; install it to unload models",
-      );
-    }
-    const res = this.cliRunner(["unload", model]);
-    if (res.status !== 0) {
-      throw new Error(`lms unload failed: ${res.stderr || res.stdout}`);
-    }
-    return { provider: PROVIDER, model, unloaded: true };
-  }
-
-  async complete(
-    params: CompletionParams,
-    timeoutMs: number,
-    onChunk?: CompletionChunkHandler,
-  ): Promise<CompletionResult> {
-    return openAiChatComplete(
-      `${this.host}/v1/chat/completions`,
-      PROVIDER,
-      params,
-      timeoutMs,
-      { onChunk },
-    );
-  }
-
-  async embed(params: EmbedParams, timeoutMs: number): Promise<EmbedResult> {
-    const data = await httpJson<OpenAiEmbedResponse>(`${this.host}/v1/embeddings`, {
-      method: "POST",
-      body: JSON.stringify({ model: params.model, input: params.input }),
-      timeoutMs,
+    const res = await this.cliRunner(args, {
+      timeoutMs: opts.timeoutMs,
+      signal: opts.signal,
+      onOutput: opts.onOutput,
     });
-    const embeddings = (data.data ?? []).map((d) => d.embedding);
-    return {
-      provider: PROVIDER,
-      model: params.model,
-      embeddings,
-      dimensions: embeddings[0]?.length ?? 0,
-    };
+    if (res.status !== 0) {
+      throw new Error(`lms ${args[0]} failed: ${(res.stderr || res.stdout).trim()}`);
+    }
+    return res;
+  }
+
+  override async pull(
+    model: string,
+    opts: RequestOptions & { onProgress?: PullProgressHandler },
+  ): Promise<PullResult> {
+    assertModelArg(model);
+    let lastPct = -1;
+    await this.lms(["get", model, "--yes"], {
+      ...opts,
+      onOutput: (chunk) => {
+        const matches = [...chunk.matchAll(/(\d+(?:\.\d+)?)\s*%/g)];
+        const last = matches.at(-1);
+        if (!last || !opts.onProgress) return;
+        const pct = Number(last[1]);
+        if (pct === lastPct) return;
+        lastPct = pct;
+        void opts.onProgress({ status: "downloading", completed: pct, total: 100 });
+      },
+    });
+    return { provider: this.name, model, status: "success" };
+  }
+
+  override async remove(model: string, opts: RequestOptions): Promise<LifecycleResult & { removed: boolean }> {
+    assertModelArg(model);
+    await this.lms(["rm", model, "--yes"], opts);
+    return { provider: this.name, model, removed: true };
+  }
+
+  override async load(
+    model: string,
+    opts: RequestOptions & { keepAlive?: string; contextLength?: number },
+  ): Promise<LifecycleResult & { loaded: boolean }> {
+    assertModelArg(model);
+    if (!(await this.lmsAvailable())) {
+      return {
+        provider: this.name,
+        model,
+        loaded: true,
+        detail: "LM Studio loads on first request (JIT); no lms CLI present",
+      };
+    }
+    const args = ["load", model, "--yes"];
+    const ttl = keepAliveToSeconds(opts.keepAlive);
+    if (ttl) args.push("--ttl", String(ttl));
+    if (opts.contextLength) args.push("--context-length", String(opts.contextLength));
+    await this.lms(args, opts);
+    return { provider: this.name, model, loaded: true };
+  }
+
+  override async unload(model: string, opts: RequestOptions): Promise<LifecycleResult & { unloaded: boolean }> {
+    assertModelArg(model);
+    await this.lms(["unload", model], opts);
+    return { provider: this.name, model, unloaded: true };
   }
 }

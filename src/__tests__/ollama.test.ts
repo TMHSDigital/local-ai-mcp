@@ -1,147 +1,223 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { OllamaProvider } from "../providers/ollama.js";
+import { OllamaProvider, parseOllamaArchitecture } from "../providers/ollama.js";
+import { mockFetch } from "./support.js";
 
 const HOST = "http://localhost:11434";
-const TIMEOUT = 5000;
+const OPTS = { timeoutMs: 5000 };
 
-interface Recorded {
-  url: string;
-  method: string;
-  body: unknown;
-}
-
-function mockFetch(handler: (url: string, init?: RequestInit) => { status?: number; body: unknown }) {
-  const calls: Recorded[] = [];
-  const fn = vi.fn(async (url: string, init?: RequestInit) => {
-    calls.push({
-      url,
-      method: init?.method ?? "GET",
-      body: init?.body ? JSON.parse(init.body as string) : undefined,
-    });
-    const { status = 200, body } = handler(url, init);
-    return {
-      ok: status >= 200 && status < 300,
-      status,
-      text: async () => JSON.stringify(body),
-    } as unknown as Response;
-  });
-  vi.stubGlobal("fetch", fn);
-  return calls;
-}
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-  vi.restoreAllMocks();
-});
+afterEach(() => vi.unstubAllGlobals());
 
 describe("OllamaProvider", () => {
-  it("listModels maps /api/tags", async () => {
-    mockFetch(() => ({
-      body: {
-        models: [
-          {
-            name: "llama3.2:3b",
-            size: 2000000000,
-            modified_at: "2024-01-01T00:00:00Z",
-            details: { family: "llama", parameter_size: "3B", quantization_level: "Q4_K_M" },
-          },
-        ],
-      },
-    }));
+  it("is local with full lifecycle and context-length support", () => {
     const p = new OllamaProvider(HOST);
-    const models = await p.listModels(TIMEOUT);
-    expect(models).toEqual([
+    expect(p.kind).toBe("local");
+    expect(p.name).toBe("ollama");
+    expect(p.capabilities()).toMatchObject({ pull: true, load: true, contextLength: true, structuredOutput: true });
+  });
+
+  it("maps /api/tags and /api/ps", async () => {
+    mockFetch((url) =>
+      url.endsWith("/api/tags")
+        ? {
+            body: {
+              models: [
+                {
+                  name: "llama3.2:3b",
+                  size: 2e9,
+                  modified_at: "2024-01-01T00:00:00Z",
+                  details: { family: "llama", parameter_size: "3B", quantization_level: "Q4_K_M" },
+                },
+              ],
+            },
+          }
+        : { body: { models: [{ name: "llama3.2:3b", size: 3e9, size_vram: 2.5e9, expires_at: "x", context_length: 8192 }] } },
+    );
+    const p = new OllamaProvider(HOST, { name: "ollama-a" });
+    expect(await p.listModels(OPTS)).toEqual([
       {
         id: "llama3.2:3b",
-        provider: "ollama",
-        sizeBytes: 2000000000,
+        provider: "ollama-a",
+        sizeBytes: 2e9,
         family: "llama",
         parameterSize: "3B",
         quantization: "Q4_K_M",
         modifiedAt: "2024-01-01T00:00:00Z",
       },
     ]);
+    expect(await p.listLoaded(OPTS)).toEqual([
+      { id: "llama3.2:3b", provider: "ollama-a", sizeBytes: 3e9, sizeVramBytes: 2.5e9, expiresAt: "x", contextLength: 8192 },
+    ]);
   });
 
-  it("listLoaded maps /api/ps", async () => {
-    const calls = mockFetch(() => ({
+  it("parses architecture for exact KV sizing from /api/show", async () => {
+    mockFetch(() => ({
       body: {
-        models: [
-          { name: "llama3.2:3b", size_vram: 3000000000, expires_at: "2024-01-01T01:00:00Z", context_length: 8192 },
-        ],
+        details: { family: "llama", parameter_size: "8.0B", quantization_level: "Q4_K_M" },
+        model_info: {
+          "general.architecture": "llama",
+          "llama.block_count": 32,
+          "llama.attention.head_count": 32,
+          "llama.attention.head_count_kv": 8,
+          "llama.embedding_length": 4096,
+          "llama.context_length": 131072,
+        },
       },
     }));
-    const p = new OllamaProvider(HOST);
-    const loaded = await p.listLoaded(TIMEOUT);
-    expect(calls[0].url).toBe(`${HOST}/api/ps`);
-    expect(loaded[0]).toEqual({
-      id: "llama3.2:3b",
+    const info = await new OllamaProvider(HOST).modelInfo("llama3.1:8b", OPTS);
+    expect(info.architecture).toEqual({ layers: 32, kvHeads: 8, keyLength: 128, valueLength: 128 });
+    expect(info.contextLength).toBe(131072);
+  });
+
+  it("averages per-layer KV head arrays", () => {
+    const r = parseOllamaArchitecture({
+      "general.architecture": "x",
+      "x.block_count": 4,
+      "x.attention.head_count": 8,
+      "x.attention.head_count_kv": [2, 2, 4, 0],
+      "x.attention.key_length": 64,
+    });
+    expect(r.architecture).toEqual({ layers: 4, kvHeads: 2, keyLength: 64, valueLength: 64 });
+  });
+
+  it("completes via native /api/chat with num_ctx, options and JSON-schema format", async () => {
+    const calls = mockFetch(() => ({
+      body: {
+        message: { content: '{"name":"Ada"}' },
+        done: true,
+        load_duration: 2e6,
+        prompt_eval_count: 20,
+        prompt_eval_duration: 4e6,
+        eval_count: 5,
+        eval_duration: 50e6,
+      },
+    }));
+    const schema = { type: "object", properties: { name: { type: "string" } } };
+    const r = await new OllamaProvider(HOST).complete(
+      {
+        model: "qwen3:8b",
+        system: "be terse",
+        prompt: "who?",
+        maxTokens: 50,
+        temperature: 0.2,
+        seed: 7,
+        contextLength: 32768,
+        responseFormat: { type: "json_schema", schema },
+      },
+      OPTS,
+    );
+    expect(calls[0].url).toBe(`${HOST}/api/chat`);
+    expect(calls[0].body).toEqual({
+      model: "qwen3:8b",
+      messages: [
+        { role: "system", content: "be terse" },
+        { role: "user", content: "who?" },
+      ],
+      options: { num_ctx: 32768, num_predict: 50, temperature: 0.2, seed: 7 },
+      format: schema,
+      stream: false,
+    });
+    expect(r).toMatchObject({
       provider: "ollama",
-      sizeVramBytes: 3000000000,
-      expiresAt: "2024-01-01T01:00:00Z",
-      contextLength: 8192,
+      local: true,
+      text: '{"name":"Ada"}',
+      parsed: { name: "Ada" },
+      promptTokens: 20,
+      completionTokens: 5,
+      timings: { loadMs: 2, promptEvalMs: 4, evalMs: 50 },
+      applied: { contextLength: true, responseFormat: true },
+    });
+    expect(r.usageEstimated).toBeUndefined();
+  });
+
+  it("streams NDJSON, reports ttft, and forwards chunks", async () => {
+    mockFetch(() => ({
+      chunks: [
+        '{"message":{"content":"Hel"},"done":false}\n',
+        '{"message":{"content":"lo"},"done":false}\n',
+        '{"message":{"content":""},"done":true,"eval_count":2,"prompt_eval_count":3}\n',
+      ],
+    }));
+    const chunks: string[] = [];
+    const r = await new OllamaProvider(HOST).complete(
+      { model: "m", prompt: "hi" },
+      { ...OPTS, onChunk: (c) => void (c.text && chunks.push(c.text)) },
+    );
+    expect(chunks).toEqual(["Hel", "lo"]);
+    expect(r).toMatchObject({ text: "Hello", streamed: true, completionTokens: 2, promptTokens: 3 });
+    expect(r.timings?.ttftMs).toBeTypeOf("number");
+  });
+
+  it("warns when the prompt was likely truncated", async () => {
+    mockFetch(() => ({ body: { message: { content: "x" }, done: true, prompt_eval_count: 2048, eval_count: 1 } }));
+    const long = "word ".repeat(10000);
+    const r = await new OllamaProvider(HOST).complete({ model: "m", prompt: long }, OPTS);
+    expect(r.warnings?.[0]).toMatch(/truncated/);
+
+    mockFetch(() => ({ body: { message: { content: "x" }, done: true, prompt_eval_count: 4096, eval_count: 1 } }));
+    const r2 = await new OllamaProvider(HOST).complete({ model: "m", prompt: long, contextLength: 4096 }, OPTS);
+    expect(r2.warnings?.[0]).toMatch(/filled the 4096-token context/);
+  });
+
+  it("sends image parts as base64 images", async () => {
+    const calls = mockFetch(() => ({ body: { message: { content: "a cat" }, done: true } }));
+    await new OllamaProvider(HOST).complete(
+      {
+        model: "llava",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "what?" },
+              { type: "image", url: "data:image/png;base64,AAAA" },
+            ],
+          },
+        ],
+      },
+      OPTS,
+    );
+    expect((calls[0].body as { messages: unknown[] }).messages[0]).toEqual({
+      role: "user",
+      content: "what?",
+      images: ["AAAA"],
     });
   });
 
-  it("modelInfo posts /api/show and extracts context_length", async () => {
+  it("pulls with streamed progress", async () => {
     const calls = mockFetch(() => ({
-      body: {
-        details: { family: "llama", parameter_size: "3B", quantization_level: "Q4_K_M" },
-        model_info: { "llama.context_length": 131072 },
-      },
+      chunks: [
+        '{"status":"pulling manifest"}\n',
+        '{"status":"pulling abc","total":100,"completed":40}\n',
+        '{"status":"success"}\n',
+      ],
     }));
-    const p = new OllamaProvider(HOST);
-    const info = await p.modelInfo("llama3.2:3b", TIMEOUT);
-    expect(calls[0].url).toBe(`${HOST}/api/show`);
-    expect(calls[0].method).toBe("POST");
-    expect(calls[0].body).toEqual({ model: "llama3.2:3b" });
-    expect(info.contextLength).toBe(131072);
-    expect(info.family).toBe("llama");
-  });
-
-  it("complete posts to /v1/chat/completions and builds messages from prompt", async () => {
-    const calls = mockFetch(() => ({
-      body: {
-        choices: [{ message: { content: "hello" } }],
-        usage: { prompt_tokens: 3, completion_tokens: 1 },
-      },
-    }));
-    const p = new OllamaProvider(HOST);
-    const res = await p.complete({ model: "llama3.2:3b", prompt: "hi", maxTokens: 10 }, TIMEOUT);
-    expect(calls[0].url).toBe(`${HOST}/v1/chat/completions`);
-    expect(calls[0].method).toBe("POST");
-    expect((calls[0].body as { messages: unknown[] }).messages).toEqual([
-      { role: "user", content: "hi" },
+    const progress: unknown[] = [];
+    const r = await new OllamaProvider(HOST).pull("qwen3:8b", { ...OPTS, onProgress: (p) => void progress.push(p) });
+    expect(calls[0].body).toEqual({ model: "qwen3:8b", stream: true });
+    expect(progress).toEqual([
+      { status: "pulling manifest" },
+      { status: "pulling abc", total: 100, completed: 40 },
+      { status: "success" },
     ]);
-    expect(res.text).toBe("hello");
-    expect(res.completionTokens).toBe(1);
+    expect(r.status).toBe("success");
   });
 
-  it("embed posts to /v1/embeddings and reports dimensions", async () => {
-    const calls = mockFetch(() => ({
-      body: { data: [{ embedding: [0.1, 0.2, 0.3] }] },
-    }));
-    const p = new OllamaProvider(HOST);
-    const res = await p.embed({ model: "nomic-embed-text", input: "x" }, TIMEOUT);
-    expect(calls[0].url).toBe(`${HOST}/v1/embeddings`);
-    expect(res.embeddings).toEqual([[0.1, 0.2, 0.3]]);
-    expect(res.dimensions).toBe(3);
-  });
-
-  it("load sends keep_alive and unload sends keep_alive:0", async () => {
+  it("loads with keep_alive and num_ctx, unloads with keep_alive 0", async () => {
     const calls = mockFetch(() => ({ body: {} }));
     const p = new OllamaProvider(HOST);
-    await p.load("llama3.2:3b", TIMEOUT, "10m");
-    await p.unload("llama3.2:3b", TIMEOUT);
-    expect(calls[0].url).toBe(`${HOST}/api/generate`);
-    expect((calls[0].body as { keep_alive: unknown }).keep_alive).toBe("10m");
-    expect((calls[1].body as { keep_alive: unknown }).keep_alive).toBe(0);
+    await p.load("m", { ...OPTS, keepAlive: "1h", contextLength: 16384 });
+    await p.unload("m", OPTS);
+    expect(calls[0].body).toEqual({ model: "m", keep_alive: "1h", options: { num_ctx: 16384 } });
+    expect(calls[1].body).toEqual({ model: "m", keep_alive: 0 });
   });
 
-  it("load defaults keep_alive to 5m", async () => {
-    const calls = mockFetch(() => ({ body: {} }));
-    const p = new OllamaProvider(HOST);
-    await p.load("llama3.2:3b", TIMEOUT);
-    expect((calls[0].body as { keep_alive: unknown }).keep_alive).toBe("5m");
+  it("embeds via /api/embed and enforces one vector per input", async () => {
+    mockFetch(() => ({ body: { embeddings: [[1, 2], [3, 4]] } }));
+    const r = await new OllamaProvider(HOST).embed({ model: "e", input: ["a", "b"] }, OPTS);
+    expect(r).toMatchObject({ dimensions: 2, embeddings: [[1, 2], [3, 4]] });
+
+    mockFetch(() => ({ body: { embeddings: [[1, 2]] } }));
+    await expect(new OllamaProvider(HOST).embed({ model: "e", input: ["a", "b"] }, OPTS)).rejects.toThrow(
+      /1 embedding\(s\) for 2 input/,
+    );
   });
 });

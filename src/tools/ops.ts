@@ -1,173 +1,257 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { providerIdZod } from "./provider-id.js";
-import { CATALOG } from "../catalog/models.js";
+import { computeFit, KV_CACHE_TYPES } from "../fit.js";
+import type { CompletionResult, Provider } from "../providers/types.js";
 import type { ToolContext } from "./context.js";
-import { aggregate, computeFit, errMsg, fail, ok } from "./helpers.js";
+import { aggregate, anyRecord, type Extra, ok, perProvider, providerArg, reqOpts, safe } from "./helpers.js";
+import { sizeModel } from "./sizing.js";
+
+const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+
+export function percentile(values: number[], p: number): number | undefined {
+  if (values.length === 0) return undefined;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
+  return sorted[idx];
+}
+
+const round = (n: number | undefined, digits = 1) =>
+  n === undefined || !Number.isFinite(n) ? undefined : Number(n.toFixed(digits));
+
+export interface RunMetrics {
+  totalMs: number;
+  ttftMs?: number;
+  loadMs?: number;
+  promptTokens?: number;
+  completionTokens: number;
+  promptTokensPerSec?: number;
+  genTokensPerSec?: number;
+  estimated: boolean;
+}
 
 /**
- * Resolve the on-disk byte size for a model: explicit sizeBytes wins, then a
- * provider's listModels entry, then the static catalog. Returns undefined if
- * unknown. Also returns parameterSize when available (for KV-cache estimates).
+ * Derive speeds from one completion. Prefers runtime-reported timings
+ * (Ollama eval_duration, llama.cpp timings); otherwise generation speed is
+ * measured after the first token so load and prompt processing are excluded.
  */
-export async function resolveModelSizeBytes(
+export function runMetrics(result: CompletionResult, totalMs: number): RunMetrics {
+  const t = result.timings ?? {};
+  const completionTokens = result.completionTokens ?? 0;
+  let genTokensPerSec: number | undefined;
+  if (t.evalMs && t.evalMs > 0 && completionTokens > 0) {
+    genTokensPerSec = (completionTokens / t.evalMs) * 1000;
+  } else if (t.ttftMs !== undefined && completionTokens > 1 && totalMs > t.ttftMs) {
+    genTokensPerSec = ((completionTokens - 1) / (totalMs - t.ttftMs)) * 1000;
+  } else if (completionTokens > 0 && totalMs > 0) {
+    genTokensPerSec = (completionTokens / totalMs) * 1000;
+  }
+  const promptTokensPerSec =
+    t.promptEvalMs && t.promptEvalMs > 0 && result.promptTokens
+      ? (result.promptTokens / t.promptEvalMs) * 1000
+      : undefined;
+  return {
+    totalMs,
+    ...(t.ttftMs !== undefined ? { ttftMs: Math.round(t.ttftMs) } : {}),
+    ...(t.loadMs !== undefined ? { loadMs: Math.round(t.loadMs) } : {}),
+    ...(result.promptTokens !== undefined ? { promptTokens: result.promptTokens } : {}),
+    completionTokens,
+    ...(promptTokensPerSec !== undefined ? { promptTokensPerSec: round(promptTokensPerSec) } : {}),
+    ...(genTokensPerSec !== undefined ? { genTokensPerSec: round(genTokensPerSec) } : {}),
+    estimated: !!result.usageEstimated || (!t.evalMs && t.ttftMs === undefined),
+  };
+}
+
+async function benchmarkOne(
   ctx: ToolContext,
+  p: Provider,
   model: string,
-  explicitSizeBytes: number | undefined,
-  providerArg: string | undefined,
-): Promise<{
-  requiredBytes: number | undefined;
-  source: string;
-  parameterSize?: string;
-}> {
-  if (typeof explicitSizeBytes === "number" && explicitSizeBytes > 0) {
-    return { requiredBytes: explicitSizeBytes, source: "explicit" };
+  args: { prompt: string; maxTokens: number; runs: number; warmup: boolean },
+  extra: Extra | undefined,
+) {
+  const { config } = ctx;
+  const opts = { ...reqOpts(config.requestTimeoutMs, extra), idleTimeoutMs: config.streamIdleTimeoutMs };
+  let coldLoadMs: number | undefined;
+  if (args.warmup) {
+    const start = Date.now();
+    const warm = await p.complete({ model, prompt: "Hi", maxTokens: 1 }, opts);
+    coldLoadMs = warm.timings?.loadMs !== undefined ? Math.round(warm.timings.loadMs) : Date.now() - start;
   }
-  try {
-    const providers = await ctx.manager.resolve(providerArg, ctx.config.detectTimeoutMs);
-    for (const p of providers) {
-      const models = await p.listModels(ctx.config.requestTimeoutMs).catch(() => []);
-      const match = models.find((m) => m.id === model);
-      if (match && typeof match.sizeBytes === "number" && match.sizeBytes > 0) {
-        return {
-          requiredBytes: match.sizeBytes,
-          source: `provider:${p.id}`,
-          parameterSize: match.parameterSize,
-        };
-      }
-    }
-  } catch {
-    // ignore detection/listing failures and fall back to catalog
+  const runs: RunMetrics[] = [];
+  for (let i = 0; i < args.runs; i++) {
+    const start = Date.now();
+    // Streaming lets us measure time-to-first-token client-side.
+    const result = await p.complete(
+      { model, prompt: args.prompt, maxTokens: args.maxTokens, temperature: 0 },
+      { ...opts, onChunk: () => undefined },
+    );
+    runs.push(runMetrics(result, Date.now() - start));
   }
-  const cat = CATALOG.find((c) => c.name === model);
-  if (cat) {
-    return {
-      requiredBytes: cat.approxSizeBytes,
-      source: "catalog",
-      parameterSize: cat.parameterSize,
-    };
-  }
-  return { requiredBytes: undefined, source: "unknown" };
+  const gen = runs.map((r) => r.genTokensPerSec).filter((v): v is number => v !== undefined);
+  const ttft = runs.map((r) => r.ttftMs).filter((v): v is number => v !== undefined);
+  const pp = runs.map((r) => r.promptTokensPerSec).filter((v): v is number => v !== undefined);
+  return {
+    provider: p.name,
+    model,
+    ...(coldLoadMs !== undefined ? { warmupMs: coldLoadMs } : {}),
+    runs: runs.length,
+    genTokensPerSec: { median: round(percentile(gen, 50)), p90: round(percentile(gen, 90)) },
+    ttftMs: { median: round(percentile(ttft, 50), 0), p90: round(percentile(ttft, 90), 0) },
+    ...(pp.length ? { promptTokensPerSec: { median: round(percentile(pp, 50)) } } : {}),
+    estimated: runs.some((r) => r.estimated),
+    samples: runs,
+  };
 }
 
 export function register(server: McpServer, ctx: ToolContext): void {
   const { manager, hardware, config } = ctx;
 
-  server.tool(
+  server.registerTool(
     "health_check",
-    "Check whether each provider's local runtime is reachable and report its version. Without a provider arg, checks all configured providers.",
-    { provider: providerIdZod.optional().describe("Optional provider id") },
-    async ({ provider }) => {
-      try {
-        const targets = provider ? [manager.get(provider)].filter(Boolean) : manager.providers;
-        if (provider && targets.length === 0) {
-          return fail(`Unknown provider: ${provider}`);
-        }
-        const byProvider = await aggregate(
-          targets as NonNullable<(typeof targets)[number]>[],
-          (p) => p.health(config.detectTimeoutMs),
-        );
-        return ok({ health: byProvider });
-      } catch (err) {
-        return fail(errMsg(err));
-      }
+    {
+      title: "Health check",
+      description:
+        "Check whether each provider is reachable and report its version (and live metrics such as vLLM KV-cache usage). Without provider, checks every configured provider, including hosted ones.",
+      inputSchema: { provider: providerArg(ctx).optional() },
+      outputSchema: { health: perProvider },
+      annotations: { ...READ_ONLY, openWorldHint: true },
     },
+    safe(async ({ provider }, extra) => {
+      const targets = provider ? [manager.require(provider)] : manager.providers;
+      const opts = reqOpts(config.detectTimeoutMs, extra);
+      const health = await aggregate(ctx, targets, async (p) => {
+        const h = await p.health(opts);
+        manager.invalidate(p.name);
+        return h;
+      });
+      return ok({ health });
+    }),
   );
 
-  server.tool(
+  server.registerTool(
     "system_resources",
-    "Report local hardware resources: platform, total/free RAM, CPU count, and detected GPUs with VRAM. Used to reason about which models can run locally.",
-    {},
-    async () => {
-      try {
-        const resources = await hardware.getSystemResources();
-        return ok(resources);
-      } catch (err) {
-        return fail(errMsg(err));
-      }
+    {
+      title: "System resources",
+      description:
+        "Report local hardware: platform, total/available RAM, CPU count, and GPUs with total/free VRAM (NVIDIA via nvidia-smi, AMD/Intel via sysfs or the Windows registry, Apple Silicon unified memory). Each GPU names its data source.",
+      inputSchema: {},
+      outputSchema: {
+        platform: z.string(),
+        ramTotalBytes: z.number(),
+        ramFreeBytes: z.number(),
+        cpuCount: z.number(),
+        gpus: z.array(anyRecord),
+      },
+      annotations: READ_ONLY,
     },
+    safe(async () => ok({ ...(await hardware.getSystemResources()) })),
   );
 
-  server.tool(
+  server.registerTool(
     "fit_check",
-    "Determine whether a model fits on the local hardware. Resolves the model weight size from the provider or the static catalog (or an explicit sizeBytes), estimates KV-cache overhead for a context length (default 4096), then compares weight+KV against free GPU VRAM, falling back to system RAM. Returns fits, target (gpu/cpu/none), weight/kv/required/available bytes.",
     {
-      model: z.string().describe("Model id/name to check"),
-      sizeBytes: z
-        .number()
-        .optional()
-        .describe("Optional explicit model weight size in bytes (overrides lookup)"),
-      contextLength: z
-        .number()
-        .optional()
-        .describe("Context length for KV-cache estimate (default 4096)"),
-      parameterSize: z
-        .string()
-        .optional()
-        .describe('Optional parameter size like "7B" or "3.8B" for KV estimate (overrides lookup)'),
-      provider: providerIdZod.optional().describe("Optional provider id"),
+      title: "Fit check",
+      description:
+        "Will a model run on this machine, and where? Uses the installed model's size and exact layer architecture when the runtime exposes it (else parameter-count or catalog estimates) to size weights + KV cache for a context length, then compares with free VRAM summed across GPUs and available RAM. Returns target gpu / partial (GPU+CPU split) / cpu / none, with the numbers and how the KV estimate was made. Credits back memory the model already uses if it is loaded.",
+      inputSchema: {
+        model: z.string().describe("Model id/name to check"),
+        sizeBytes: z.number().positive().optional().describe("Explicit weight size in bytes (overrides lookup)"),
+        contextLength: z.number().int().positive().optional().describe("Context length for the KV-cache estimate (default 4096)"),
+        parameterSize: z.string().optional().describe('Parameter size like "7B" (overrides lookup)'),
+        kvCacheType: z.enum(KV_CACHE_TYPES).optional().describe("KV cache precision: f16 (default), q8_0, q4_0"),
+        provider: providerArg(ctx).optional(),
+      },
+      outputSchema: {
+        model: z.string(),
+        fits: z.boolean(),
+        target: z.enum(["gpu", "partial", "cpu", "none"]),
+        sizeSource: z.string(),
+        loaded: z.boolean(),
+        requiredBytes: z.number(),
+        availableBytes: z.number(),
+        note: z.string(),
+      },
+      annotations: READ_ONLY,
     },
-    async ({ model, sizeBytes, contextLength, parameterSize, provider }) => {
-      try {
-        const resolved = await resolveModelSizeBytes(ctx, model, sizeBytes, provider);
-        if (resolved.requiredBytes === undefined) {
-          return fail(
-            `Could not determine size for "${model}" from provider or catalog. Pass sizeBytes to check fit explicitly.`,
-          );
-        }
-        const resources = await hardware.getSystemResources();
-        const outcome = computeFit(resources, resolved.requiredBytes, {
-          contextLength,
-          parameterSize: parameterSize ?? resolved.parameterSize,
-        });
-        return ok({ model, sizeSource: resolved.source, ...outcome });
-      } catch (err) {
-        return fail(errMsg(err));
+    safe(async ({ model, sizeBytes, contextLength, parameterSize, kvCacheType, provider }, extra) => {
+      const detectOpts = reqOpts(config.detectTimeoutMs, extra);
+      const opts = reqOpts(config.requestTimeoutMs, extra);
+      let p: Provider | undefined;
+      if (provider) p = manager.require(provider);
+      else {
+        const live = (await manager.detected(detectOpts)).filter((x) => x.kind === "local");
+        p = (await manager.locate(model, live, opts))[0];
       }
-    },
+      const sizing = await sizeModel(ctx, p, model, opts, { sizeBytes, parameterSize });
+      if (sizing.weightBytes === undefined) {
+        throw new Error(
+          `Could not determine size for "${model}" from a provider or the catalog. Pass sizeBytes (and parameterSize) to check fit explicitly.`,
+        );
+      }
+      const resources = await hardware.getSystemResources();
+      const outcome = computeFit(resources, sizing.weightBytes, {
+        contextLength,
+        parameterSize: sizing.parameterSize,
+        architecture: sizing.architecture,
+        kvCacheType,
+        residentVramBytes: sizing.residentVramBytes,
+        residentRamBytes: sizing.residentRamBytes,
+      });
+      return ok({
+        model,
+        ...(p ? { provider: p.name } : {}),
+        sizeSource: sizing.source,
+        loaded: sizing.loaded,
+        ...(sizing.maxContextLength ? { maxContextLength: sizing.maxContextLength } : {}),
+        ...(sizing.maxContextLength && outcome.contextLength > sizing.maxContextLength
+          ? { warning: `contextLength exceeds the model's maximum (${sizing.maxContextLength})` }
+          : {}),
+        ...outcome,
+      });
+    }),
   );
 
-  server.tool(
+  server.registerTool(
     "benchmark",
-    "HEAVY: Runs REAL inference. Executes one small completion against a loaded/loadable model and measures latency (ms) and throughput (tokens/sec). This consumes compute and may load the model. Without a provider arg, runs on the first detected provider.",
     {
-      model: z.string().describe("Model id/name to benchmark"),
-      prompt: z.string().optional().describe("Optional prompt; a short default is used otherwise"),
-      maxTokens: z.number().optional().describe("Max tokens to generate (default 64)"),
-      provider: providerIdZod.optional().describe("Optional provider id"),
+      title: "Benchmark",
+      description:
+        "HEAVY: Runs REAL inference. Measures a model on this machine with a warmup (absorbs load time) plus N streamed runs: time-to-first-token, generation tokens/sec (runtime-reported when available, else measured after the first token), and prompt-processing speed. Pass models[] to compare several models with the same prompt, ranked by generation speed.",
+      inputSchema: {
+        model: z.string().optional().describe("Model id/name to benchmark"),
+        models: z.array(z.string()).optional().describe("Compare several models (ranked by median generation tokens/sec)"),
+        prompt: z.string().optional().describe("Prompt (default: a short fixed prompt)"),
+        maxTokens: z.number().int().positive().optional().describe("Tokens to generate per run (default 128)"),
+        runs: z.number().int().min(1).max(20).optional().describe("Measured runs per model (default 3)"),
+        warmup: z.boolean().optional().describe("Run a 1-token warmup first so load time is excluded (default true)"),
+        provider: providerArg(ctx).optional(),
+      },
+      outputSchema: { results: z.array(anyRecord) },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    async ({ model, prompt, maxTokens, provider }) => {
-      try {
-        const providers = await manager.resolve(provider, config.detectTimeoutMs);
-        if (providers.length === 0) {
-          return fail("No live providers detected to benchmark against.");
+    safe(async ({ model, models, prompt, maxTokens, runs, warmup, provider }, extra) => {
+      const targets = [...new Set([...(model ? [model] : []), ...(models ?? [])])];
+      if (targets.length === 0) throw new Error("Provide model or models[].");
+      const args = {
+        prompt: prompt ?? "Explain in a few sentences why running language models locally can be useful.",
+        maxTokens: maxTokens ?? 128,
+        runs: runs ?? 3,
+        warmup: warmup ?? true,
+      };
+      const results: Record<string, unknown>[] = [];
+      for (const m of targets) {
+        try {
+          const p = await manager.select(provider, m, reqOpts(config.detectTimeoutMs, extra), { capability: "complete" });
+          results.push(await benchmarkOne(ctx, p, m, args, extra));
+        } catch (err) {
+          results.push({ model: m, error: err instanceof Error ? err.message : String(err) });
         }
-        const p = providers[0];
-        const max = typeof maxTokens === "number" && maxTokens > 0 ? maxTokens : 64;
-        const start = Date.now();
-        const result = await p.complete(
-          {
-            model,
-            prompt: prompt ?? "Write one short sentence about local AI.",
-            maxTokens: max,
-          },
-          config.requestTimeoutMs,
-        );
-        const latencyMs = Date.now() - start;
-        const completionTokens =
-          result.completionTokens ?? Math.max(1, Math.round(result.text.length / 4));
-        const tokensPerSec = latencyMs > 0 ? (completionTokens / latencyMs) * 1000 : 0;
-        return ok({
-          provider: p.id,
-          model,
-          latencyMs,
-          completionTokens,
-          tokensPerSec: Number(tokensPerSec.toFixed(2)),
-          maxTokens: max,
-        });
-      } catch (err) {
-        return fail(errMsg(err));
       }
-    },
+      results.sort((a, b) => {
+        const ga = (a.genTokensPerSec as { median?: number } | undefined)?.median ?? -1;
+        const gb = (b.genTokensPerSec as { median?: number } | undefined)?.median ?? -1;
+        return gb - ga;
+      });
+      return ok({ results });
+    }),
   );
 }

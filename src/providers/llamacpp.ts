@@ -1,21 +1,16 @@
 import { httpJson, probe } from "../http.js";
-import { openAiChatComplete } from "./openai-complete.js";
-import type {
-  CompletionChunkHandler,
-  CompletionParams,
-  CompletionResult,
-  EmbedParams,
-  EmbedResult,
-  HealthStatus,
-  LoadedModelInfo,
-  ModelDetail,
-  ModelSummary,
-  Provider,
-  ProviderCapabilities,
-  PullResult,
+import { OpenAICompatibleProvider, errorMessage, toEmbedResult } from "./base.js";
+import {
+  ModelNotFoundError,
+  type EmbedParams,
+  type EmbedResult,
+  type HealthStatus,
+  type LoadedModelInfo,
+  type ModelDetail,
+  type ModelSummary,
+  type ProviderCapabilities,
+  type RequestOptions,
 } from "./types.js";
-
-const PROVIDER = "llamacpp" as const;
 
 interface LlamaCppProps {
   model_path?: string;
@@ -35,89 +30,45 @@ interface LlamaCppSlot {
   params?: { model?: string };
 }
 
-interface OpenAiModel {
-  id: string;
-  owned_by?: string;
-}
-
-interface OpenAiEmbedResponse {
-  data?: Array<{ embedding: number[] }>;
-  embedding?: number[];
-}
-
 /**
  * First-class llama.cpp server adapter (llama-server).
  * Uses native /health, /props, /slots plus OpenAI-compatible /v1 routes.
  */
-export class LlamaCppProvider implements Provider {
-  readonly id = PROVIDER;
-  readonly host: string;
+export class LlamaCppProvider extends OpenAICompatibleProvider {
+  readonly type = "llamacpp" as const;
 
-  constructor(host: string) {
-    this.host = host;
-  }
-
-  /** Base without trailing /v1 — native routes live on the server root. */
+  /** Base without trailing /v1: native routes live on the server root. */
   private root(): string {
     return this.host.replace(/\/v1\/?$/i, "");
   }
 
-  private v1(): string {
-    const root = this.root();
-    return this.host.toLowerCase().endsWith("/v1") ? this.host : `${root}/v1`;
+  protected override v1(): string {
+    return `${this.root()}/v1`;
   }
 
-  capabilities(): ProviderCapabilities {
-    return {
-      provider: PROVIDER,
-      complete: true,
-      embed: true,
-      pull: false,
-      remove: false,
-      load: false,
-      unload: false,
-      search: false,
-    };
+  override capabilities(): ProviderCapabilities {
+    return this.caps({ complete: true, embed: true, structuredOutput: true });
   }
 
-  async detect(timeoutMs: number): Promise<boolean> {
-    if (await probe(`${this.root()}/health`, timeoutMs)) return true;
+  override async detect(opts: RequestOptions): Promise<boolean> {
+    if (await probe(`${this.root()}/health`, opts.timeoutMs, { signal: opts.signal })) return true;
+    return super.detect(opts);
+  }
+
+  override async health(opts: RequestOptions): Promise<HealthStatus> {
     try {
-      await httpJson(`${this.v1()}/models`, { timeoutMs });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  async health(timeoutMs: number): Promise<HealthStatus> {
-    try {
-      const data = await httpJson<{ status?: string }>(`${this.root()}/health`, { timeoutMs });
-      return {
-        provider: PROVIDER,
-        live: true,
-        host: this.host,
-        version: data.status ?? "ok",
-      };
+      const data = await httpJson<{ status?: string }>(`${this.root()}/health`, opts);
+      return this.healthy(data.status ?? "ok");
     } catch (err) {
       // Fall back to /v1/models for servers without /health
-      try {
-        await httpJson(`${this.v1()}/models`, { timeoutMs });
-        return { provider: PROVIDER, live: true, host: this.host };
-      } catch {
-        return {
-          provider: PROVIDER,
-          live: false,
-          host: this.host,
-          error: err instanceof Error ? err.message : String(err),
-        };
-      }
+      const fallback = await super.health(opts);
+      return fallback.live ? fallback : this.unhealthy(err);
     }
   }
 
-  private async props(timeoutMs: number): Promise<LlamaCppProps | undefined> {
+  private async props(opts: RequestOptions): Promise<LlamaCppProps | undefined> {
     try {
-      return await httpJson<LlamaCppProps>(`${this.root()}/props`, { timeoutMs });
+      return await httpJson<LlamaCppProps>(`${this.root()}/props`, opts);
     } catch {
       return undefined;
     }
@@ -132,139 +83,83 @@ export class LlamaCppProvider implements Provider {
     );
   }
 
-  async listModels(timeoutMs: number): Promise<ModelSummary[]> {
+  override async listModels(opts: RequestOptions): Promise<ModelSummary[]> {
     try {
-      const data = await httpJson<{ data?: OpenAiModel[] }>(`${this.v1()}/models`, { timeoutMs });
-      if (data.data && data.data.length > 0) {
-        return data.data.map((m) => ({
-          id: m.id,
-          provider: PROVIDER,
-          family: m.owned_by,
-        }));
-      }
+      const models = await super.listModels(opts);
+      if (models.length > 0) return models;
     } catch {
       // fall through to /props
     }
-    const props = await this.props(timeoutMs);
+    const props = await this.props(opts);
     const id = this.modelIdFromProps(props);
     if (!id) return [];
-    return [{ id, provider: PROVIDER }];
+    const ctx = props?.default_generation_settings?.n_ctx;
+    return [{ id, provider: this.name, ...(ctx ? { contextLength: ctx } : {}) }];
   }
 
-  async listLoaded(timeoutMs: number): Promise<LoadedModelInfo[]> {
+  override async listLoaded(opts: RequestOptions): Promise<LoadedModelInfo[]> {
     try {
-      const slots = await httpJson<LlamaCppSlot[]>(`${this.root()}/slots`, { timeoutMs });
+      const slots = await httpJson<LlamaCppSlot[]>(`${this.root()}/slots`, opts);
       if (Array.isArray(slots) && slots.length > 0) {
         const byId = new Map<string, LoadedModelInfo>();
         for (const slot of slots) {
           const id = slot.model || slot.params?.model;
           if (!id) continue;
-          byId.set(id, {
-            id,
-            provider: PROVIDER,
-            contextLength: slot.n_ctx,
-          });
+          byId.set(id, { id, provider: this.name, contextLength: slot.n_ctx });
         }
         if (byId.size > 0) return [...byId.values()];
       }
     } catch {
       // slots endpoint optional
     }
-    const props = await this.props(timeoutMs);
+    const props = await this.props(opts);
     const id = this.modelIdFromProps(props);
     if (!id) return [];
-    return [
-      {
-        id,
-        provider: PROVIDER,
-        contextLength: props?.default_generation_settings?.n_ctx,
-      },
-    ];
+    return [{ id, provider: this.name, contextLength: props?.default_generation_settings?.n_ctx }];
   }
 
-  async modelInfo(model: string, timeoutMs: number): Promise<ModelDetail> {
-    const props = await this.props(timeoutMs);
-    const models = await this.listModels(timeoutMs);
+  override async modelInfo(model: string, opts: RequestOptions): Promise<ModelDetail> {
+    const [props, models] = await Promise.all([this.props(opts), this.listModels(opts)]);
     const m = models.find((x) => x.id === model);
-    if (!m) throw new Error(`Model not found on llamacpp: ${model}`);
+    if (!m) throw new ModelNotFoundError(this.name, model);
     return {
       ...m,
-      contextLength: props?.default_generation_settings?.n_ctx,
+      contextLength: props?.default_generation_settings?.n_ctx ?? m.contextLength,
       details: props as unknown as Record<string, unknown>,
     };
   }
 
-  async pull(_model: string, _timeoutMs: number): Promise<PullResult> {
-    throw new Error("llamacpp does not support pull; start llama-server with --model");
-  }
-
-  async remove(
-    _model: string,
-    _timeoutMs: number,
-  ): Promise<{ provider: typeof PROVIDER; model: string; removed: boolean }> {
-    throw new Error("llamacpp does not support remove");
-  }
-
-  async load(
-    _model: string,
-    _timeoutMs: number,
-    _keepAlive?: string,
-  ): Promise<{ provider: typeof PROVIDER; model: string; loaded: boolean; detail?: string }> {
-    throw new Error("llamacpp loads the model at server start; restart llama-server to change models");
-  }
-
-  async unload(
-    _model: string,
-    _timeoutMs: number,
-  ): Promise<{ provider: typeof PROVIDER; model: string; unloaded: boolean; detail?: string }> {
-    throw new Error("llamacpp does not support unload; stop the server to free VRAM");
-  }
-
-  async complete(
-    params: CompletionParams,
-    timeoutMs: number,
-    onChunk?: CompletionChunkHandler,
-  ): Promise<CompletionResult> {
-    return openAiChatComplete(
-      `${this.v1()}/chat/completions`,
-      PROVIDER,
-      params,
-      timeoutMs,
-      { onChunk },
-    );
-  }
-
-  async embed(params: EmbedParams, timeoutMs: number): Promise<EmbedResult> {
+  /**
+   * OpenAI /v1/embeddings first; native /embedding as a fallback for older
+   * servers. The fallback embeds every input (one request each) so the
+   * result always has one vector per input.
+   */
+  override async embed(params: EmbedParams, opts: RequestOptions): Promise<EmbedResult> {
+    let v1Error: unknown;
     try {
-      const data = await httpJson<OpenAiEmbedResponse>(`${this.v1()}/embeddings`, {
-        method: "POST",
-        body: JSON.stringify({ model: params.model, input: params.input }),
-        timeoutMs,
-      });
-      const embeddings = (data.data ?? []).map((d) => d.embedding);
-      if (embeddings.length > 0) {
-        return {
-          provider: PROVIDER,
-          model: params.model,
-          embeddings,
-          dimensions: embeddings[0]?.length ?? 0,
-        };
-      }
-    } catch {
-      // fall through to native /embedding
+      return await super.embed(params, opts);
+    } catch (err) {
+      v1Error = err;
     }
-    const input = Array.isArray(params.input) ? params.input[0] : params.input;
-    const data = await httpJson<{ embedding?: number[] }>(`${this.root()}/embedding`, {
-      method: "POST",
-      body: JSON.stringify({ content: input }),
-      timeoutMs,
-    });
-    const embedding = data.embedding ?? [];
-    return {
-      provider: PROVIDER,
-      model: params.model,
-      embeddings: [embedding],
-      dimensions: embedding.length,
-    };
+    const inputs = Array.isArray(params.input) ? params.input : [params.input];
+    try {
+      const embeddings: number[][] = [];
+      for (const content of inputs) {
+        const data = await httpJson<{ embedding?: number[] | number[][] } | Array<{ embedding?: number[] | number[][] }>>(
+          `${this.root()}/embedding`,
+          { method: "POST", body: JSON.stringify({ content }), ...opts },
+        );
+        const row = Array.isArray(data) ? data[0]?.embedding : data.embedding;
+        // Newer servers nest per-token vectors; take the pooled first row.
+        const vec = Array.isArray(row?.[0]) ? (row as number[][])[0] : (row as number[] | undefined);
+        if (!vec || vec.length === 0) throw new Error("empty embedding");
+        embeddings.push(vec);
+      }
+      return toEmbedResult(this, params, embeddings);
+    } catch (err) {
+      throw new Error(
+        `llama.cpp embeddings failed (/v1/embeddings: ${errorMessage(v1Error)}; /embedding: ${errorMessage(err)}). Start llama-server with --embeddings and an embedding model.`,
+      );
+    }
   }
 }

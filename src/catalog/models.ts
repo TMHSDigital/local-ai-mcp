@@ -305,6 +305,33 @@ export function searchCatalog(query: string): CatalogModel[] {
   });
 }
 
-export function fitsIn(approxSizeBytes: number, freeBytes: number): boolean {
-  return approxSizeBytes * 1.2 <= freeBytes;
+export const CATALOG_TASKS = ["chat", "code", "embed", "vision", "reasoning", "general"] as const;
+export type CatalogTask = (typeof CATALOG_TASKS)[number];
+
+/** Catalog entry for a model id ("llama3" matches "llama3:latest"). */
+export function findCatalog(model: string): CatalogModel | undefined {
+  const norm = (s: string) => s.toLowerCase().replace(/:latest$/, "");
+  const id = norm(model);
+  return CATALOG.find((c) => norm(c.name) === id);
+}
+
+/**
+ * Task tags for an arbitrary installed model: catalog first, then name/family
+ * heuristics (coder, embed, vision, reasoning markers). Everything else is
+ * treated as a general chat model.
+ */
+export function tasksForModel(id: string, family?: string): CatalogTask[] {
+  const cat = findCatalog(id);
+  if (cat) return cat.tasks as CatalogTask[];
+  const s = `${id} ${family ?? ""}`.toLowerCase();
+  if (/embed|\bbge\b|bge-|minilm|\be5-|gte-|snowflake-arctic-embed|nomic-bert/.test(s)) return ["embed"];
+  const tasks = new Set<CatalogTask>();
+  if (/coder|code|starcoder|codestral|devstral|granite-code/.test(s)) tasks.add("code");
+  if (/llava|vision|-vl\b|\bvl\b|minicpm-v|moondream|gemma3|qwen2\.5vl|pixtral|mllama/.test(s)) {
+    tasks.add("vision");
+  }
+  if (/-r1\b|\br1\b|qwq|reason|think|magistral|qwen3|gpt-oss/.test(s)) tasks.add("reasoning");
+  tasks.add("chat");
+  tasks.add("general");
+  return [...tasks];
 }
