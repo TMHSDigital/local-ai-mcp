@@ -1,0 +1,110 @@
+{
+  "manifest_version": "0.3",
+  "name": "local-ai-mcp",
+  "display_name": "Local AI MCP",
+  "version": "0.5.0",
+  "description": "Run, fit, and route work to local LLMs: Ollama, LM Studio, llama.cpp, Docker Model Runner, MLX, vLLM, Foundry Local.",
+  "long_description": "An operations-first control plane for the models on your own machine. Discover what is installed and loaded across runtimes, check what fits your GPU (exact KV-cache sizing, multi-GPU, Apple Silicon unified memory), pull/load/unload models, and delegate completions or embeddings to the best local model with one call. Inference never goes to a hosted API unless you configure one and name it explicitly.",
+  "author": {
+    "name": "TMHSDigital",
+    "url": "https://github.com/TMHSDigital"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TMHSDigital/local-ai-mcp.git"
+  },
+  "homepage": "https://tmhsdigital.github.io/local-ai-mcp/",
+  "support": "https://github.com/TMHSDigital/local-ai-mcp/issues",
+  "license": "CC-BY-NC-ND-4.0",
+  "keywords": [
+    "ollama",
+    "lm-studio",
+    "llama.cpp",
+    "local-llm",
+    "gpu",
+    "inference"
+  ],
+  "privacy_policies": [
+    "https://huggingface.co/privacy"
+  ],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/dist/index.js"
+      ],
+      "env": {
+        "OLLAMA_HOST": "${user_config.ollama_host}",
+        "LMSTUDIO_HOST": "${user_config.lmstudio_host}",
+        "LLAMACPP_HOST": "${user_config.llamacpp_host}",
+        "MLX_HOST": "${user_config.mlx_host}",
+        "VLLM_HOST": "${user_config.vllm_host}",
+        "OPENAI_COMPAT_HOST": "${user_config.openai_compat_host}",
+        "LOCAL_AI_DISABLE_NETWORK_SEARCH": "${user_config.disable_network_search}"
+      }
+    }
+  },
+  "user_config": {
+    "ollama_host": {
+      "type": "string",
+      "title": "Ollama URL",
+      "description": "Leave blank for http://localhost:11434",
+      "default": "",
+      "required": false
+    },
+    "lmstudio_host": {
+      "type": "string",
+      "title": "LM Studio URL",
+      "description": "Leave blank for http://localhost:1234",
+      "default": "",
+      "required": false
+    },
+    "llamacpp_host": {
+      "type": "string",
+      "title": "llama.cpp server URL",
+      "description": "Leave blank for http://localhost:8080",
+      "default": "",
+      "required": false
+    },
+    "mlx_host": {
+      "type": "string",
+      "title": "MLX server URL (optional)",
+      "description": "mlx_lm.server address, e.g. http://localhost:8081",
+      "default": "",
+      "required": false
+    },
+    "vllm_host": {
+      "type": "string",
+      "title": "vLLM server URL (optional)",
+      "description": "e.g. http://localhost:8000",
+      "default": "",
+      "required": false
+    },
+    "openai_compat_host": {
+      "type": "string",
+      "title": "Other OpenAI-compatible server (optional)",
+      "description": "Base URL including /v1 (Jan, LocalAI, ...)",
+      "default": "",
+      "required": false
+    },
+    "disable_network_search": {
+      "type": "boolean",
+      "title": "Disable Hugging Face model search",
+      "description": "Keep search_models offline (catalog only)",
+      "default": false,
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
+  }
+}

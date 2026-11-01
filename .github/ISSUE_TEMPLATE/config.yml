@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and help
+    url: https://github.com/TMHSDigital/local-ai-mcp/discussions
+    about: Setup questions, "how do I…", and ideas in progress.
+  - name: Report a security vulnerability
+    url: https://github.com/TMHSDigital/local-ai-mcp/security/advisories/new
+    about: Please report privately, never in a public issue.

@@ -1,15 +1,22 @@
 # Local AI MCP
 
-This is a mcp-server repository for Local AI MCP development.
+MCP server (TypeScript, stdio) that manages local model runtimes: Ollama, LM Studio, llama.cpp, Docker Model Runner, MLX, vLLM, Foundry Local, OpenAI-compatible servers, and opt-in hosted Moonshot.
+
+This repo is PUBLIC: never commit secrets, tokens, private hostnames, or filled-in .env files.
 
 ## Project structure
 
-- `src/` -- TypeScript source
-- `package.json` -- npm package manifest
+- `src/index.ts`: stdio entry; `src/server.ts`: createServer wiring
+- `src/providers/`: adapters (extend BaseProvider / OpenAICompatibleProvider in base.ts), routing in manager.ts
+- `src/tools/`: MCP tools (registerTool + annotations + outputSchema), resources and prompts
+- `src/fit.ts`: VRAM/KV-cache fit math; `src/hardware/`: per-OS GPU/RAM probes
+- `src/__tests__/`: vitest, fully offline (mockFetch / FakeProvider in support.ts)
 
 ## Conventions
 
-- Use conventional commits (feat:, fix:, chore:, docs:)
-- Bump the version in `package.json` in your PR; CI tags and publishes it
-- Keep mcp-tools.json in sync with the registered tools
-- Provider adapters live in src/providers/; tools live in src/tools/
+- Conventional commits (feat:, fix:, chore:, docs:)
+- Bump with `npm version <bump> --no-git-tag-version` (syncs server.json and mcpb/manifest.json); CI tags and publishes
+- Implicit routing must use ProviderManager.select() and stay local-only
+- After changing tools run `npm run gen:tools`; list new env vars in .env.example
+- New adapters join the conformance suite in src/__tests__/conformance.test.ts
+- Checks: npm run lint && npm run typecheck && npm test

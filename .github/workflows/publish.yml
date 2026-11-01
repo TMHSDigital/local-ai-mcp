@@ -6,7 +6,9 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: read
+  # contents: write to attach the .mcpb bundle to the release;
+  # id-token: write for npm provenance and MCP Registry OIDC login.
+  contents: write
   id-token: write
 
 jobs:
@@ -49,3 +51,31 @@ jobs:
           # Remove once a trusted publisher is configured on npmjs.com for
           # this repo/workflow; OIDC is then used and no token is needed.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Build Claude Desktop extension (.mcpb)
+        run: |
+          set -euo pipefail
+          ver=$(node -p "require('./package.json').version")
+          rm -rf mcpb-build && mkdir mcpb-build
+          cp -r dist package.json package-lock.json README.md LICENSE mcpb-build/
+          cp mcpb/manifest.json mcpb-build/
+          (cd mcpb-build && npm ci --omit=dev --ignore-scripts)
+          npx -y @anthropic-ai/mcpb@2.1.2 validate mcpb-build/manifest.json
+          npx -y @anthropic-ai/mcpb@2.1.2 pack mcpb-build "local-ai-mcp-${ver}.mcpb"
+          echo "VERSION=${ver}" >> "$GITHUB_ENV"
+
+      - name: Attach .mcpb to the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "v${VERSION}" "local-ai-mcp-${VERSION}.mcpb" --clobber
+
+      # Lists this version in the official MCP Registry. Authenticates with the
+      # workflow's GitHub OIDC token (io.github.TMHSDigital/* namespace); the
+      # registry checks package.json "mcpName" against server.json "name".
+      - name: Publish to the MCP Registry
+        if: steps.pub.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          curl -sfL "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.7/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish

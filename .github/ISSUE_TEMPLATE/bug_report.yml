@@ -1,0 +1,57 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! **Do not paste API keys, tokens, or private hostnames** — this repo is public.
+        Security vulnerabilities: please use [private reporting](https://github.com/TMHSDigital/local-ai-mcp/security/advisories/new) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did (tool name and arguments), what you expected, and what you got.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: local-ai-mcp version
+      placeholder: "0.5.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Runtime(s) involved
+      multiple: true
+      options:
+        - Ollama
+        - LM Studio
+        - llama.cpp
+        - Docker Model Runner
+        - MLX
+        - vLLM
+        - Foundry Local
+        - OpenAI-compatible (other)
+        - Moonshot
+        - Not runtime-specific
+    validations:
+      required: true
+  - type: input
+    id: runtime-version
+    attributes:
+      label: Runtime version(s)
+      placeholder: "ollama 0.40.13"
+  - type: input
+    id: env
+    attributes:
+      label: OS, GPU, and MCP client
+      placeholder: "Windows 11, RTX 4090, Claude Desktop 1.x"
+  - type: textarea
+    id: output
+    attributes:
+      label: health_check / system_resources output
+      description: Optional but very helpful. Remove anything private first.
+      render: json

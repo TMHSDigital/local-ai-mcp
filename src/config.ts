@@ -138,15 +138,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     if (!disabled.has(p.type) && !disabled.has(p.name)) providers.push(p);
   };
   const optionalHost = (v: string | undefined) => (v?.trim() ? normalizeHost(v) : undefined);
+  // Blank values (e.g. `OLLAMA_HOST=` in a .env file or an empty bundle
+  // setting) mean "use the default", not an empty host.
+  const hostOr = (v: string | undefined, fallback: string) => optionalHost(v) ?? fallback;
 
   // Always-on local runtimes with well-known, distinct default ports.
-  add({ type: "ollama", name: "ollama", host: normalizeHost(env.OLLAMA_HOST ?? "http://localhost:11434") });
-  add({ type: "lmstudio", name: "lmstudio", host: normalizeHost(env.LMSTUDIO_HOST ?? "http://localhost:1234") });
-  add({ type: "llamacpp", name: "llamacpp", host: normalizeHost(env.LLAMACPP_HOST ?? "http://localhost:8080") });
+  add({ type: "ollama", name: "ollama", host: hostOr(env.OLLAMA_HOST, "http://localhost:11434") });
+  add({ type: "lmstudio", name: "lmstudio", host: hostOr(env.LMSTUDIO_HOST, "http://localhost:1234") });
+  add({ type: "llamacpp", name: "llamacpp", host: hostOr(env.LLAMACPP_HOST, "http://localhost:8080") });
   add({
     type: "dockermodelrunner",
     name: "dockermodelrunner",
-    host: normalizeHost(env.DOCKER_MODEL_RUNNER_HOST ?? "http://localhost:12434"),
+    host: hostOr(env.DOCKER_MODEL_RUNNER_HOST, "http://localhost:12434"),
   });
 
   // Opt-in runtimes: their default ports collide with other servers or are dynamic.
@@ -174,7 +177,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     add({
       type: "moonshot",
       name: "moonshot",
-      host: normalizeHost(env.MOONSHOT_HOST ?? "https://api.moonshot.ai/v1"),
+      host: hostOr(env.MOONSHOT_HOST, "https://api.moonshot.ai/v1"),
       apiKey: moonshotKey,
       kind: "hosted",
     });

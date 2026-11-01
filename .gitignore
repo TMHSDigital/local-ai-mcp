@@ -11,6 +11,7 @@ build/
 *.tgz
 *.mcpb
 *.dxt
+mcpb-build/
 
 # --- Test and coverage output ---
 coverage/

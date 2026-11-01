@@ -7,6 +7,84 @@ tags that version and publishes it.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-31
+
+### Breaking
+
+- Calls without a `provider` argument never use a **hosted** provider such as
+  Moonshot unless `LOCAL_AI_ALLOW_HOSTED_FALLBACK=1` is set. Moonshot is only
+  registered when `MOONSHOT_API_KEY` is set. Results now report `provider`,
+  `host`, and `local`.
+- `complete`, `embed`, `benchmark`, `load_model`, and `unload_model` run on
+  the provider that has the model. `pull_model`, `load_model`, and
+  `unload_model` act on exactly one provider; they no longer fan out.
+- The tool `provider` argument is now a provider *instance name* (defaults
+  equal the runtime type).
+- `Provider` interface methods take a `RequestOptions` object (`timeoutMs`,
+  `signal`) instead of a positional timeout.
+- `fit_check` results gained `partial` as a target and new fields
+  (`kvEstimate`, `gpuAvailableBytes`, `ramAvailableBytes`, `gpuFraction`, ...).
+
+### Added
+
+- New runtimes: **Docker Model Runner** (on by default, port 12434),
+  **MLX** (`MLX_HOST`), **vLLM** (`VLLM_HOST`, with `/metrics` in
+  `health_check`), and **Foundry Local** (`FOUNDRY_LOCAL_HOST`). Multiple
+  instances via `LOCAL_AI_PROVIDERS`; skip runtimes with `LOCAL_AI_DISABLE`.
+- `delegate`: picks the best local model for a task (loaded, then installed
+  and fitting, then optionally pulled), runs it, and explains the choice.
+- `ensure_model`: pull (opt-in), fit check, LRU/all eviction, load, verify;
+  `dryRun` returns the plan.
+- `search_models`: Hugging Face GGUF search with per-quant sizes, the best
+  quant for this machine, and `hf.co/<repo>:<quant>` pull references.
+- `complete`: `system`, JSON / JSON-Schema `responseFormat` with a validated
+  `parsed` result, `seed`, `topP`, `topK`, `repeatPenalty`, `contextLength`,
+  `options`, and image inputs for vision models.
+- `pull_model` streams download progress (with totals) as MCP progress.
+- `benchmark`: warmup, N runs, time-to-first-token, runtime-measured
+  generation and prompt speed, median/p90, multi-model comparison.
+- macOS / Apple Silicon hardware probe (unified memory, Metal working set,
+  `vm_stat` available memory); AMD VRAM on Linux (sysfs); 64-bit VRAM on
+  Windows (registry). GPUs report their data source.
+- MCP resources (`local-ai://system`, `local-ai://loaded` with
+  subscriptions, `local-ai://models/{provider}`) and prompts (`setup`,
+  `free-vram`, `benchmark-my-models`, `pick-model`).
+- Tool titles, annotations (read-only / destructive / open-world), output
+  schemas, and structured content. `remove_model` confirms with the user
+  through elicitation when the client supports it.
+- Distribution: MCP Registry `server.json`, a Claude Desktop `.mcpb` bundle
+  attached to each release, and one-click install links in the README.
+
+### Fixed
+
+- `fit_check` KV-cache estimate was about 16x too small. It is now exact from
+  model architecture (Ollama `/api/show`), with a corrected heuristic
+  otherwise, support for quantized KV, multi-GPU totals, partial offload, and
+  credit for an already-loaded model.
+- Ollama prompts were silently truncated: completions now use native
+  `/api/chat` so `contextLength` sets `num_ctx`, with a truncation warning.
+- Streamed completions (the default) reported no token usage.
+- MCP cancellation now stops inference and downloads. Streams use an idle
+  timeout (`LOCAL_AI_STREAM_IDLE_TIMEOUT_MS`) instead of a total cap.
+- LM Studio lifecycle and hardware probes no longer block the event loop
+  (async subprocesses with timeouts and closed stdin). `lms` runs
+  non-interactively, and model ids that look like flags are rejected.
+- The llama.cpp embedding fallback dropped every input after the first.
+- `suggest_model` ranked the *smallest* fitting model first.
+- Provider detection is cached (`LOCAL_AI_CACHE_TTL_MS`), so tool calls no
+  longer probe every runtime, or call a hosted API, each time.
+- Blank host variables (e.g. `OLLAMA_HOST=`) now fall back to defaults.
+
+### Changed
+
+- zod 4, `@modelcontextprotocol/sdk` 1.32, vitest 5; `npm audit` is clean.
+- CI: Biome lint, typecheck of tests, Linux/Windows/macOS x Node 22/24,
+  coverage thresholds, `mcp-tools.json` drift check, stdio smoke test, Node
+  20 runtime check, and a nightly integration run against real runtimes.
+  Third-party actions are pinned by SHA.
+- Stale bot only closes `needs-info` issues; triaged work is exempt.
+- Hardened `.gitignore`; `.gitattributes` enforces LF.
+
 ## [0.4.0] - 2026-07-18
 
 ### Added

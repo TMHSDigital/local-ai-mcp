@@ -1,16 +1,17 @@
 import { runCommand, type ExecOptions, type ExecResult } from "../exec.js";
 import { httpJson, probe } from "../http.js";
 import { OpenAICompatibleProvider, type ProviderOptions } from "./base.js";
-import type {
-  HealthStatus,
-  LifecycleResult,
-  LoadedModelInfo,
-  ModelDetail,
-  ModelSummary,
-  ProviderCapabilities,
-  PullProgressHandler,
-  PullResult,
-  RequestOptions,
+import {
+  UnsupportedOperationError,
+  type HealthStatus,
+  type LifecycleResult,
+  type LoadedModelInfo,
+  type ModelDetail,
+  type ModelSummary,
+  type ProviderCapabilities,
+  type PullProgressHandler,
+  type PullResult,
+  type RequestOptions,
 } from "./types.js";
 
 export type CliResult = ExecResult;
@@ -139,7 +140,8 @@ export class LMStudioProvider extends OpenAICompatibleProvider {
 
   private async lms(args: string[], opts: RequestOptions & { onOutput?: (s: string) => void }): Promise<CliResult> {
     if (!(await this.lmsAvailable())) {
-      throw new Error(`LM Studio ${args[0]} requires the lms CLI on PATH (https://lmstudio.ai/docs/cli)`);
+      const op = { get: "pull", rm: "remove" }[args[0]] ?? args[0];
+      throw new UnsupportedOperationError(this.name, op, "it requires the lms CLI on PATH (https://lmstudio.ai/docs/cli)");
     }
     const res = await this.cliRunner(args, {
       timeoutMs: opts.timeoutMs,

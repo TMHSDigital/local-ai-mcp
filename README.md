@@ -1,136 +1,174 @@
 # Local AI MCP
 
-**Unified MCP server for managing local model runtimes (Ollama, LM Studio, and more): provider-agnostic discovery, lifecycle, hardware-fit, and delegated inference.**
+**One MCP server for every local model runtime on your machine. It knows what fits your GPU, and it never sends a prompt to the cloud unless you tell it to.**
 
+[![npm](https://img.shields.io/npm/v/@tmhs/local-ai-mcp?color=7c3aed)](https://www.npmjs.com/package/@tmhs/local-ai-mcp)
+[![CI](https://github.com/TMHSDigital/local-ai-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/TMHSDigital/local-ai-mcp/actions/workflows/ci.yml)
 ![License: CC-BY-NC-ND-4.0](https://img.shields.io/badge/license-CC--BY--NC--ND--4.0-green)
-![Version](https://img.shields.io/badge/version-0.4.0-blue)
 ![Type](https://img.shields.io/badge/type-mcp--server-7c3aed)
 
----
+[![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=local-ai&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkB0bWhzL2xvY2FsLWFpLW1jcCJdfQ==)
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_MCP_server-0098FF?logo=visualstudiocode)](https://insiders.vscode.dev/redirect/mcp/install?name=local-ai&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40tmhs%2Flocal-ai-mcp%22%5D%7D)
+[![Claude Desktop extension](https://img.shields.io/badge/Claude_Desktop-.mcpb_bundle-d97757)](https://github.com/TMHSDigital/local-ai-mcp/releases/latest)
 
-Local AI MCP is an [MCP](https://modelcontextprotocol.io) server that turns your local model runtimes into an agent-callable control plane. It is **operations-first**: its primary job is to discover, inspect, fit, and manage the models running on your own machine. It speaks to runtimes over their local HTTP APIs and exposes one consistent tool surface across them, so an agent does not need to know whether a model lives in Ollama or LM Studio. The server is **local-first**: local runtimes are the primary target, with optional hosted providers (such as Moonshot AI) available behind the same tool surface when you configure an API key.
+Local AI MCP gives your agent (Claude, Cursor, VS Code, and others) one control plane for **Ollama, LM Studio, llama.cpp, Docker Model Runner, MLX, vLLM and Foundry Local**. Your agent can see what's installed and loaded, check what will actually fit in your VRAM, get models ready, and hand work off to the best local model with a single `delegate` call.
 
-The server communicates over **stdio only**. It is a *client* to your local runtimes and never opens a network listener of its own.
-
-## Why an ops-first local-model server
-
-- **Discovery and lifecycle, not just chat.** List what is installed, what is loaded, pull and remove models, load and unload them, and check their fit against your hardware before you commit VRAM to them.
-- **Hardware-aware.** `system_resources` and `fit_check` read your real RAM and GPU/VRAM so an agent can pick a model that will actually run, and `suggest_model` ranks candidates by task *and* by what fits.
-- **Provider-agnostic.** Every tool takes an optional `provider` argument. Omit it and the tool operates across all detected runtimes, aggregating results per provider.
-
-## Inference is delegation, not chat
-
-The `complete` and `embed` tools exist to **delegate (offload) inference to a model you choose** for cost control and privacy: by default that means keeping tokens and data on your own hardware, with hosted providers as an explicit opt-in. They are deliberately framed as delegated/offloaded inference primitives, not as a conversational chat surface.
-
-## The provider-adapter model
-
-Each runtime is implemented as an adapter behind a single `Provider` interface (`src/providers/types.ts`) with a uniform method set: `detect`, `health`, `listModels`, `listLoaded`, `modelInfo`, `pull`, `remove`, `load`, `unload`, `complete`, `embed`, and `capabilities`. Adding a runtime means adding one adapter; the tool layer is unchanged.
-
-| Adapter | Default host | Transport | Notes |
-|---------|--------------|-----------|-------|
-| **Ollama** (`src/providers/ollama.ts`) | `http://localhost:11434` | Native REST + OpenAI-compatible | `load`/`unload` map to Ollama `keep_alive` semantics (`keep_alive` to load, `keep_alive: 0` to unload). `complete`/`embed` use the OpenAI-compatible `/v1` routes. |
-| **LM Studio** (`src/providers/lmstudio.ts`) | `http://localhost:1234` | REST (`/api/v0`) + OpenAI-compatible | Uses the `lms` CLI for `load`/`unload`/`pull`/`remove` when present; falls back to REST for `listModels`/`listLoaded`/`complete`/`embed`. |
-| **llama.cpp** (`src/providers/llamacpp.ts`) | `http://localhost:8080` | Native `/health` `/props` `/slots` + OpenAI `/v1` | Model is loaded at server start; no pull/load/unload. Slot introspection via `/slots`. |
-| **OpenAI-compat** (`src/providers/openaicompat.ts`) | *(unset)* | OpenAI-compatible `/v1` | Opt-in via `OPENAI_COMPAT_HOST` (vLLM, Jan, etc.). Inference only. |
-| **Moonshot AI (Kimi)** (`src/providers/moonshot.ts`) | `https://api.moonshot.ai/v1` | Hosted OpenAI-compatible | Requires `MOONSHOT_API_KEY` (Bearer auth); not detected without it. `complete` and `listModels` only; lifecycle (`pull`/`remove`/`load`/`unload`) and `embed` are unsupported for the hosted API. Flagship model: `kimi-k3`. |
-
-**Auto-detection:** on each call the server probes the configured endpoints to determine which providers are live (hosted providers require their API key to be set). Hardware probing is isolated in `src/hardware/` and branches by platform (Windows / Linux); it exposes total/free RAM and, where detectable, GPU name and VRAM.
-
-## Tool surface (16 tools)
-
-### Discovery
-| Tool | Description |
-|------|-------------|
-| `list_providers` | Configured runtimes, their host, live/detected status, and capabilities. |
-| `list_models` | Installed models across detected providers (or one provider). |
-| `list_loaded` | Models currently resident in memory. |
-| `model_info` | Detailed metadata for a model. |
-
-### Lifecycle
-| Tool | Description |
-|------|-------------|
-| `pull_model` | Download a model. **Heavy: may transfer multiple GB.** |
-| `remove_model` | Delete a model from disk. **Destructive: requires `confirm: true` and a `provider` (no fan-out); refuses without `confirm: true`.** |
-| `load_model` | Load a model into memory (Ollama `keep_alive`; LM Studio `lms load`). |
-| `unload_model` | Evict a model from memory. |
-
-### Ops
-| Tool | Description |
-|------|-------------|
-| `health_check` | Liveness and version per provider. |
-| `system_resources` | Total/free RAM, CPU count, and GPU/VRAM. |
-| `fit_check` | Whether weight + KV-cache estimate fits in free VRAM (GPU) or RAM (CPU). |
-| `benchmark` | Measure latency and tokens/sec with one small completion. **Heavy: runs real inference.** |
-
-### Registry
-| Tool | Description |
-|------|-------------|
-| `search_available` | Search a curated catalog of well-known models (Ollama library oriented). |
-| `suggest_model` | Recommend a model for a task, ranked by what fits your detected hardware. |
-
-### Delegation (offloaded inference)
-| Tool | Description |
-|------|-------------|
-| `complete` | Delegate a completion (streams via MCP progress when the client sends a progressToken). |
-| `embed` | Delegate embedding generation to a local model. |
-
-Every tool except `system_resources` accepts an optional `provider` (`ollama` \| `lmstudio` \| `llamacpp` \| `openaicompat` \| `moonshot`). Omit it to operate across all detected runtimes.
-
-## Install and run
-
-```bash
-npx @tmhs/local-ai-mcp
+```text
+# illustrative session
+You:    Summarise these 40 pages of meeting notes locally, I don't want them in the cloud.
+Agent:  → delegate { task: "summarize", prompt: "...", contextLength: 32768 }
+        ← routing: ollama / qwen3:14b — already loaded (no load cost); general model; fits: gpu
+          local: true · 412 tokens · 38 tok/s
 ```
 
-### Claude Desktop / Cursor config
+## Why use it
+
+- **It knows your hardware.** `fit_check` sizes the KV cache from the model's actual layer architecture, adds up VRAM across GPUs, models partial GPU/CPU offload, and understands Apple Silicon unified memory. It answers "will this model run, and where?" with numbers rather than guesses.
+- **It works across runtimes.** If you run Ollama *and* LM Studio, each call goes to the runtime that actually has the model. Lifecycle actions such as pull, load and unload affect exactly one runtime.
+- **It keeps data local by default.** Hosted providers such as Moonshot are opt-in, and a call without a `provider` argument never uses one. Every result reports `provider`, `host` and `local`, so you can see where inference ran.
+- **It handles operations, not just chat.** Pull with progress, load with a context size, evict least-recently-used models to make room, benchmark time-to-first-token and tokens per second, and search Hugging Face for GGUF quantizations that fit your machine.
+
+## Things to ask your agent
+
+- "What can I run for coding on this laptop?" → `suggest_model`, then `ensure_model`
+- "Free up my GPU." → `list_loaded`, then `unload_model` (or use the `free-vram` prompt)
+- "Benchmark my installed coder models and tell me which is fastest." → `benchmark { models: [...] }`
+- "Find a newer Gemma build that fits my 12 GB card." → `search_models { source: "huggingface" }`
+- "Extract the invoice fields from this text as JSON, locally." → `delegate { task: "extract", responseFormat: { type: "json_schema", ... } }`
+- "Will Llama 3.1 70B run here with 32K context?" → `fit_check { model, contextLength: 32768 }`
+
+## Quick start
+
+Install at least one runtime ([Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), [llama.cpp](https://github.com/ggml-org/llama.cpp), Docker Model Runner, MLX, vLLM or Foundry Local), then add the server to your client. No configuration is needed for runtimes on their default ports.
+
+**Claude Code**
+
+```bash
+claude mcp add local-ai -- npx -y @tmhs/local-ai-mcp
+```
+
+**Claude Desktop.** Download the `.mcpb` file from the [latest release](https://github.com/TMHSDigital/local-ai-mcp/releases/latest) and open it. You get a settings screen for hosts and no JSON to edit. Alternatively, add this to `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
-    "local-ai": {
-      "command": "npx",
-      "args": ["-y", "@tmhs/local-ai-mcp"],
-      "env": {
-        "OLLAMA_HOST": "http://localhost:11434",
-        "LMSTUDIO_HOST": "http://localhost:1234",
-        "MOONSHOT_API_KEY": "your-moonshot-api-key"
-      }
-    }
+    "local-ai": { "command": "npx", "args": ["-y", "@tmhs/local-ai-mcp"] }
   }
 }
 ```
 
+**Cursor / VS Code.** Use the install buttons above, or add the same `command`/`args` to `.cursor/mcp.json` or `.vscode/mcp.json` (VS Code uses a top-level `"servers"` key instead of `"mcpServers"`).
+
+**Windsurf, Cline, Zed and other clients.** Any stdio MCP client works: the command is `npx`, the args are `["-y", "@tmhs/local-ai-mcp"]`.
+
+> **Windows:** a few clients can't launch `npx` directly. If the server doesn't start, use `"command": "cmd", "args": ["/c", "npx", "-y", "@tmhs/local-ai-mcp"]`.
+
+**Adding a hosted provider (optional).** Put `MOONSHOT_API_KEY` in the server's `env`. It is only used when a tool call names `provider: "moonshot"`, unless you also set `LOCAL_AI_ALLOW_HOSTED_FALLBACK=1`.
+
+## Supported runtimes
+
+| Runtime | Enabled | Default host | List / loaded | Pull | Load / unload | Remove | Embed | Notes |
+|---|---|---|---|---|---|---|---|---|
+| **Ollama** | always | `localhost:11434` | ✓ / ✓ | ✓ progress | ✓ (`keep_alive`, `num_ctx`) | ✓ | ✓ | Native `/api/chat`: `contextLength` sets `num_ctx`, exact timings, JSON-schema `format` |
+| **LM Studio** | always | `localhost:1234` | ✓ / ✓ | ✓ via `lms` | ✓ via `lms` (TTL, context) | ✓ via `lms` | ✓ | Lifecycle needs the [`lms` CLI](https://lmstudio.ai/docs/cli); without it, models load on first request |
+| **llama.cpp** (`llama-server`) | always | `localhost:8080` | ✓ / ✓ (`/slots`) | – | – | – | ✓ | One model per server; start with `--embeddings` for `embed` |
+| **Docker Model Runner** | always | `localhost:12434` | ✓ / – | ✓ progress | on first request | ✓ | ✓ | Enable host-side TCP support in Docker Desktop |
+| **MLX** (`mlx_lm.server`) | `MLX_HOST` | – | ✓ / – | – | on first request | – | – | Apple Silicon; switches models per request |
+| **vLLM** | `VLLM_HOST` | – | ✓ / ✓ | – | – | – | ✓ | `health_check` reports KV-cache usage and queue depth from `/metrics` |
+| **Foundry Local** | `FOUNDRY_LOCAL_HOST` | dynamic port | ✓ / ✓ | ✓ progress | ✓ (TTL) | – | – | Find the port with `foundry service status` |
+| **OpenAI-compatible** (Jan, LocalAI, …) | `OPENAI_COMPAT_HOST` | – | ✓ / ✓ | – | – | – | ✓ | Local or hosted, inferred from the host |
+| **Moonshot AI (Kimi)** | `MOONSHOT_API_KEY` | `api.moonshot.ai/v1` | ✓ / – | – | – | – | – | **Hosted**: never selected implicitly |
+
+You can run more than one instance of a runtime, for example a second Ollama box on your LAN, with `LOCAL_AI_PROVIDERS='[{"type":"ollama","name":"ollama-gpu2","host":"http://192.168.1.20:11434"}]'`. Use `LOCAL_AI_DISABLE=lmstudio,dockermodelrunner` to skip probing runtimes you don't use.
+
+## Privacy model
+
+- Each provider is either **local** or **hosted**. The kind is inferred from its host: loopback, private LAN ranges, `*.local`, Tailscale CGNAT and `host.docker.internal` count as local. You can override it per instance in `LOCAL_AI_PROVIDERS`.
+- With no `provider` argument, `complete`, `embed`, `delegate`, `benchmark`, `load_model` and the other model-scoped tools only consider **live local** providers that have the model. If the model exists only on a hosted provider, the call fails and tells you how to opt in.
+- Hosted providers are never probed on routine calls. Only `health_check` contacts them.
+- `search_models` with `source: "huggingface"` queries the Hugging Face Hub, and only when you ask it to. Set `LOCAL_AI_DISABLE_NETWORK_SEARCH=1` to forbid it.
+- The server uses **stdio only**. It never opens a network listener.
+
+## Tools (19)
+
+Every tool declares MCP annotations (read-only, destructive, open-world) and an output schema, and returns structured content.
+
+| Group | Tool | What it does |
+|---|---|---|
+| Discovery | `list_providers` | Configured runtimes: kind (local/hosted), live status, capabilities |
+| | `list_models` | Installed models on each live provider |
+| | `list_loaded` | Models resident in memory, with VRAM use and context length |
+| | `model_info` | Family, size, quantization, context length and layer architecture |
+| Lifecycle | `pull_model` | **Heavy.** Downloads to one provider, streaming progress notifications |
+| | `remove_model` | **Destructive.** `provider` is required; asks you directly through MCP elicitation when the client supports it, otherwise needs `confirm: true` |
+| | `load_model` / `unload_model` | One provider, with optional `keepAlive` and `contextLength` |
+| | `ensure_model` | Pull (if allowed), fit check, evict others (`lru` / `all`), load and verify. `dryRun` returns the plan only |
+| Ops | `health_check` | Reachability, version, runtime metrics |
+| | `system_resources` | RAM and GPUs (NVIDIA, AMD, Intel, Apple Silicon), each tagged with its data source |
+| | `fit_check` | Returns `gpu` / `partial` / `cpu` / `none` for a model at a given context length and KV-cache precision |
+| | `benchmark` | **Heavy.** Warmup, then N runs: time-to-first-token, generation and prompt tokens/sec. `models: [...]` to compare |
+| Registry | `search_available` | Built-in offline catalog |
+| | `suggest_model` | Best models for a task on *this* machine: largest that fits on the GPU first, flags installed ones |
+| | `search_models` | Live Hugging Face GGUF search with per-quantization fit and pull references (`hf.co/<repo>:<quant>`) |
+| Delegation | `complete` | Run a completion on a model you choose: system prompt, JSON / JSON-schema output (validated), seed, sampling, images, `contextLength` |
+| | `embed` | Embeddings, always one vector per input |
+| | `delegate` | **One call:** picks the best local model for a task (loaded, then installed and fitting, then optionally pulled), runs it, and explains the choice |
+
+**Resources:** `local-ai://system`, `local-ai://loaded` (subscribable; updates when models load or unload), and `local-ai://models/{provider}`.
+**Prompts:** `setup`, `free-vram`, `benchmark-my-models`, `pick-model`.
+
 ## Configuration
 
-All configuration is via environment variables with sane defaults:
+Every setting is an environment variable, and blank means the default. See [`.env.example`](.env.example) for the full annotated list.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OLLAMA_HOST` | `http://localhost:11434` | Ollama base URL (scheme optional; added if missing). |
-| `LMSTUDIO_HOST` | `http://localhost:1234` | LM Studio base URL. |
-| `LLAMACPP_HOST` | `http://localhost:8080` | llama.cpp server base URL. |
-| `OPENAI_COMPAT_HOST` | *(unset)* | Generic OpenAI-compatible `/v1` base URL (vLLM, Jan, …). Provider omitted when unset. |
-| `OPENAI_COMPAT_API_KEY` | *(unset)* | Optional Bearer token for the OpenAI-compat adapter. |
-| `MOONSHOT_HOST` | `https://api.moonshot.ai/v1` | Moonshot AI base URL (include the `/v1` path). |
-| `MOONSHOT_API_KEY` | *(unset)* | Moonshot AI API key (Bearer token). The provider is skipped when unset. |
-| `LOCAL_AI_REQUEST_TIMEOUT_MS` | `120000` | Timeout for normal requests (inference, pull progress, etc.). |
-| `LOCAL_AI_DETECT_TIMEOUT_MS` | `1500` | Timeout for provider auto-detection probes. |
-| `LOCAL_AI_PULL_TIMEOUT_MS` | `3600000` | Timeout for model pulls (multi-GB downloads); set `0` to disable. |
+| Variable | Default | Purpose |
+|---|---|---|
+| `OLLAMA_HOST`, `LMSTUDIO_HOST`, `LLAMACPP_HOST`, `DOCKER_MODEL_RUNNER_HOST` | standard local ports | Always-on runtimes |
+| `MLX_HOST`, `VLLM_HOST` (+`VLLM_API_KEY`), `FOUNDRY_LOCAL_HOST`, `OPENAI_COMPAT_HOST` (+`OPENAI_COMPAT_API_KEY`) | unset | Opt-in runtimes |
+| `LOCAL_AI_PROVIDERS` | unset | JSON array of extra instances `{type, host, name?, apiKey?, kind?}` |
+| `LOCAL_AI_DISABLE` | unset | Comma-separated types or names to skip |
+| `MOONSHOT_API_KEY`, `MOONSHOT_HOST` | unset, `https://api.moonshot.ai/v1` | Hosted Moonshot provider |
+| `LOCAL_AI_ALLOW_HOSTED_FALLBACK` | off | Let calls without a `provider` use hosted providers |
+| `LOCAL_AI_DISABLE_NETWORK_SEARCH` | off | Forbid Hugging Face search |
+| `LOCAL_AI_REQUEST_TIMEOUT_MS` | `120000` | Non-streamed requests |
+| `LOCAL_AI_DETECT_TIMEOUT_MS` | `1500` | Detection probes |
+| `LOCAL_AI_PULL_TIMEOUT_MS` | `3600000` | Downloads (`0` = no limit) |
+| `LOCAL_AI_STREAM_IDLE_TIMEOUT_MS` | `60000` | Abort a stream only if no token arrives for this long |
+| `LOCAL_AI_STREAM_MAX_MS` | `1800000` | Hard cap on a streamed completion (`0` = none) |
+| `LOCAL_AI_CACHE_TTL_MS` | `10000` | Detection and model-list cache |
+
+## Troubleshooting
+
+- **A provider isn't detected.** Run `health_check`. Check the host and port. From WSL, use the Windows host IP. From a container, use `host.docker.internal`. For Docker Model Runner, enable host-side TCP support.
+- **LM Studio pull/load fails with "requires the lms CLI".** Install the `lms` CLI as described in the [LM Studio CLI docs](https://lmstudio.ai/docs/cli) so it is on `PATH`, then restart your MCP client.
+- **llama.cpp `embed` fails.** Start `llama-server` with `--embeddings` and an embedding-capable model.
+- **Answers about long inputs look truncated (Ollama).** Pass `contextLength` (it sets `num_ctx`). The result includes a warning when truncation is likely.
+- **"was not found on any live local provider".** The model is either not installed (check `list_models`) or only available on a hosted provider. Name that provider explicitly to use it.
+- **macOS memory numbers look low.** `system_resources` reports *available* memory (free, inactive and purgeable pages) and the Metal working-set limit, not total RAM.
 
 ## Development
 
 ```bash
 npm install
-npm run build      # tsc -> dist/
-npm test           # vitest; runs fully offline (mocked HTTP, stubbed hardware)
+npm run build       # tsc -> dist/
+npm test            # vitest, fully offline (mocked HTTP, stubbed hardware)
+npm run lint        # Biome
+npm run typecheck   # src and tests
+npm run gen:tools   # regenerate mcp-tools.json after changing tools
+npm run smoke       # boot the built server over stdio
 ```
 
-The test suite requires **no running runtime and no downloaded model**: every HTTP call is mocked and hardware probing is stubbed.
+CI runs on Linux, Windows and macOS with Node 22 and 24, plus a Node 20 runtime check. A nightly workflow tests the adapters against real Ollama and llama.cpp. See [CONTRIBUTING.md](CONTRIBUTING.md), including **Adding a runtime adapter**.
+
+## Support
+
+Questions and ideas go in [Discussions](https://github.com/TMHSDigital/local-ai-mcp/discussions). Report bugs with the issue templates, and security problems through [private reporting](https://github.com/TMHSDigital/local-ai-mcp/security/advisories/new). If this saves you time, consider [sponsoring](https://github.com/sponsors/TMHSDigital).
 
 ## License
 
-CC-BY-NC-ND-4.0 -- see [LICENSE](LICENSE).
+CC-BY-NC-ND-4.0. See [LICENSE](LICENSE). Contributions are accepted under the DCO and the inbound grant described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
 **Built by TMHSDigital**
+<!-- standards-version: 1.10.0 -->

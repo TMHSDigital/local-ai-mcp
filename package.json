@@ -1,7 +1,8 @@
 {
   "name": "@tmhs/local-ai-mcp",
-  "version": "0.4.0",
-  "description": "Unified MCP server for managing local model runtimes (Ollama, LM Studio, and more): provider-agnostic discovery, lifecycle, hardware-fit, and delegated inference.",
+  "version": "0.5.0",
+  "mcpName": "io.github.TMHSDigital/local-ai-mcp",
+  "description": "Run, fit, and route work to local LLMs: one MCP server for Ollama, LM Studio, llama.cpp, Docker Model Runner, MLX, vLLM, and Foundry Local, with hardware-aware model selection.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -21,7 +22,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "smoke": "node scripts/smoke.mjs",
     "gen:tools": "npm run build && node scripts/gen-tools.mjs",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "version": "node scripts/sync-version.mjs && git add server.json mcpb/manifest.json"
   },
   "author": "TMHSDigital",
   "license": "CC-BY-NC-ND-4.0",
@@ -36,11 +38,20 @@
   "keywords": [
     "mcp",
     "model-context-protocol",
+    "mcp-server",
     "ollama",
     "lm-studio",
+    "llama.cpp",
+    "mlx",
+    "vllm",
+    "docker-model-runner",
+    "foundry-local",
     "local-llm",
     "local-ai",
+    "gpu",
+    "vram",
     "inference",
+    "claude",
     "developer-tools"
   ],
   "engines": {

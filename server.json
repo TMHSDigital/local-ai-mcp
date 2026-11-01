@@ -1,0 +1,87 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.TMHSDigital/local-ai-mcp",
+  "title": "Local AI MCP",
+  "description": "Run, fit, and route work to local LLMs (Ollama, LM Studio, llama.cpp, MLX, vLLM, and more).",
+  "repository": {
+    "url": "https://github.com/TMHSDigital/local-ai-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://tmhsdigital.github.io/local-ai-mcp/",
+  "version": "0.5.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@tmhs/local-ai-mcp",
+      "version": "0.5.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "OLLAMA_HOST",
+          "description": "Ollama base URL",
+          "default": "http://localhost:11434",
+          "isRequired": false
+        },
+        {
+          "name": "LMSTUDIO_HOST",
+          "description": "LM Studio server base URL",
+          "default": "http://localhost:1234",
+          "isRequired": false
+        },
+        {
+          "name": "LLAMACPP_HOST",
+          "description": "llama.cpp server (llama-server) base URL",
+          "default": "http://localhost:8080",
+          "isRequired": false
+        },
+        {
+          "name": "DOCKER_MODEL_RUNNER_HOST",
+          "description": "Docker Model Runner host TCP endpoint",
+          "default": "http://localhost:12434",
+          "isRequired": false
+        },
+        {
+          "name": "MLX_HOST",
+          "description": "mlx_lm.server base URL (opt-in; Apple Silicon)",
+          "isRequired": false
+        },
+        {
+          "name": "VLLM_HOST",
+          "description": "vLLM OpenAI server base URL (opt-in)",
+          "isRequired": false
+        },
+        {
+          "name": "FOUNDRY_LOCAL_HOST",
+          "description": "Foundry Local service URL (opt-in; port from `foundry service status`)",
+          "isRequired": false
+        },
+        {
+          "name": "OPENAI_COMPAT_HOST",
+          "description": "Any OpenAI-compatible /v1 server (opt-in)",
+          "isRequired": false
+        },
+        {
+          "name": "OPENAI_COMPAT_API_KEY",
+          "description": "Bearer token for OPENAI_COMPAT_HOST",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "MOONSHOT_API_KEY",
+          "description": "Moonshot AI (Kimi) key. Hosted: only used when named explicitly.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "LOCAL_AI_ALLOW_HOSTED_FALLBACK",
+          "description": "Allow implicit routing to hosted providers (default: off)",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

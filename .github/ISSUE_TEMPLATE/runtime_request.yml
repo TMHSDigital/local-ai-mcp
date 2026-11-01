@@ -1,0 +1,29 @@
+name: Runtime / adapter request
+description: Ask for support for another local model runtime
+labels: ["feature", "provider"]
+body:
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime
+      placeholder: "e.g. KoboldCpp, LocalAI, Lemonade"
+    validations:
+      required: true
+  - type: textarea
+    id: api
+    attributes:
+      label: API surface
+      description: Links to its HTTP API docs. Which of list / loaded / pull / remove / load / unload / complete / embed does it expose?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it matters
+      description: Who uses it, and what you want to do with it through MCP.
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Contributing
+      options:
+        - label: I'd like to implement this adapter (see CONTRIBUTING.md → "Adding a runtime adapter")

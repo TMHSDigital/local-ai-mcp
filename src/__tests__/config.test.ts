@@ -20,6 +20,13 @@ describe("loadConfig", () => {
     expect(c.cacheTtlMs).toBe(10000);
   });
 
+  it("treats blank host variables as unset (e.g. KEY= in .env or empty bundle settings)", () => {
+    const c = loadConfig({ OLLAMA_HOST: "", LMSTUDIO_HOST: "  ", MOONSHOT_API_KEY: "k", MOONSHOT_HOST: "" });
+    expect(c.providers.find((p) => p.name === "ollama")?.host).toBe("http://localhost:11434");
+    expect(c.providers.find((p) => p.name === "lmstudio")?.host).toBe("http://localhost:1234");
+    expect(c.providers.find((p) => p.name === "moonshot")?.host).toBe("https://api.moonshot.ai/v1");
+  });
+
   it("adds a scheme and strips trailing slashes", () => {
     expect(normalizeHost("localhost:11434/")).toBe("http://localhost:11434");
     expect(normalizeHost("https://x.test///")).toBe("https://x.test");

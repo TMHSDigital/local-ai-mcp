@@ -4,7 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Local AI MCP</title>
-  <meta name="description" content="Unified MCP server for managing local model runtimes (Ollama, LM Studio, Moonshot): provider-agnostic discovery, lifecycle, hardware-fit, and delegated inference.">
+  <meta name="description" content="One MCP server for local LLM runtimes (Ollama, LM Studio, llama.cpp, Docker Model Runner, MLX, vLLM, Foundry Local): hardware-aware model fit, lifecycle, and local-first delegated inference.">
+  <meta property="og:title" content="Local AI MCP">
+  <meta property="og:description" content="One MCP server for every local model runtime. It knows what fits your GPU, and it never sends a prompt to the cloud unless you tell it to.">
+  <meta property="og:url" content="https://tmhsdigital.github.io/local-ai-mcp/">
+  <meta property="og:type" content="website">
   <style>
     :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --accent: #7c3aed; --accent2: #a78bfa; --card: #161b22; --border: #30363d; }
     * { box-sizing: border-box; }
@@ -36,7 +40,7 @@
 <body>
   <div class="wrap">
     <h1>Local AI MCP</h1>
-    <p class="tag">Unified MCP server for managing local model runtimes (Ollama, LM Studio, and more): provider-agnostic discovery, lifecycle, hardware-fit, and delegated inference.</p>
+    <p class="tag">One MCP server for every local model runtime. It knows what fits your GPU, and it never sends a prompt to the cloud unless you tell it to.</p>
     <p class="badges">
       <img src="https://img.shields.io/badge/license-CC--BY--NC--ND--4.0-green" alt="License">
       <img src="https://img.shields.io/npm/v/@tmhs/local-ai-mcp?color=7c3aed" alt="npm">
@@ -44,61 +48,61 @@
     </p>
 
     <h2>What it is</h2>
-    <p>An operations-first control plane for the models on your own machine. It discovers, inspects, fits, and manages local runtimes over their local HTTP APIs, exposing one consistent tool surface across them. It runs over <strong>stdio only</strong> and is a client to your runtimes &mdash; it never opens a network listener of its own. Hosted providers (such as Moonshot AI) are an explicit opt-in behind the same tool surface.</p>
+    <p>An operations-first control plane for the models on your own machine. Your agent can see what is installed and loaded across runtimes, check what will actually fit in your VRAM, get models ready, and hand work to the best local model with one <code>delegate</code> call. It runs over <strong>stdio only</strong> and never opens a network listener.</p>
 
-    <h2>Inference is delegation, not chat</h2>
-    <p>The <code>complete</code> and <code>embed</code> tools <strong>delegate (offload) inference to a local model</strong> for cost control and privacy &mdash; keeping tokens and data on your hardware instead of a hosted API. They are inference primitives, not a conversational chat surface. <code>complete</code> streams tokens via MCP progress notifications when the client supplies a progress token.</p>
+    <h2>Local first, by construction</h2>
+    <p>Each provider is <strong>local</strong> or <strong>hosted</strong>. Calls without a <code>provider</code> argument only use live local providers that have the model. Hosted APIs such as Moonshot are used only when named explicitly, or when you set <code>LOCAL_AI_ALLOW_HOSTED_FALLBACK=1</code>. Every result reports <code>provider</code>, <code>host</code> and <code>local</code>.</p>
 
-    <h2>Provider-adapter model</h2>
-    <p>Each runtime is an adapter behind a single <code>Provider</code> interface. Every tool takes an optional <code>provider</code> argument; omit it and the tool operates across all detected runtimes.</p>
+    <h2>Hardware-aware</h2>
+    <p><code>fit_check</code> sizes the KV cache from the model's real layer architecture, sums VRAM across GPUs, models partial GPU/CPU offload and quantized KV caches, and understands Apple Silicon unified memory. Hardware probes cover NVIDIA, AMD (Linux sysfs, Windows registry), Intel, and Apple Silicon.</p>
+
+    <h2>Supported runtimes</h2>
     <table>
-      <tr><th>Adapter</th><th>Default host</th><th>Notes</th></tr>
-      <tr><td>Ollama</td><td><code>http://localhost:11434</code></td><td>Native REST + OpenAI-compatible <code>/v1</code>; load/unload via <code>keep_alive</code>.</td></tr>
-      <tr><td>LM Studio</td><td><code>http://localhost:1234</code></td><td>REST <code>/api/v0</code> + OpenAI-compatible; <code>lms</code> CLI for load/unload/pull when present.</td></tr>
-      <tr><td>llama.cpp</td><td><code>http://localhost:8080</code></td><td>Native <code>/health</code> <code>/props</code> <code>/slots</code> + OpenAI <code>/v1</code>.</td></tr>
-      <tr><td>OpenAI-compat</td><td><em>unset</em></td><td>Opt-in via <code>OPENAI_COMPAT_HOST</code> (vLLM, Jan, etc.).</td></tr>
-      <tr><td>Moonshot AI (Kimi)</td><td><code>https://api.moonshot.ai/v1</code></td><td>Hosted OpenAI-compatible; requires <code>MOONSHOT_API_KEY</code>. <code>complete</code>/<code>listModels</code> only.</td></tr>
+      <tr><th>Runtime</th><th>Enabled by</th><th>Notes</th></tr>
+      <tr><td>Ollama</td><td>default <code>localhost:11434</code></td><td>Full lifecycle; pull progress; <code>contextLength</code> sets <code>num_ctx</code>.</td></tr>
+      <tr><td>LM Studio</td><td>default <code>localhost:1234</code></td><td>Lifecycle via the <code>lms</code> CLI (TTL, context length).</td></tr>
+      <tr><td>llama.cpp</td><td>default <code>localhost:8080</code></td><td><code>/health</code>, <code>/props</code>, <code>/slots</code>, embeddings.</td></tr>
+      <tr><td>Docker Model Runner</td><td>default <code>localhost:12434</code></td><td>Pull with progress, remove, OpenAI routes under <code>/engines/v1</code>.</td></tr>
+      <tr><td>MLX</td><td><code>MLX_HOST</code></td><td><code>mlx_lm.server</code> on Apple Silicon.</td></tr>
+      <tr><td>vLLM</td><td><code>VLLM_HOST</code></td><td>KV-cache usage and queue depth from <code>/metrics</code>.</td></tr>
+      <tr><td>Foundry Local</td><td><code>FOUNDRY_LOCAL_HOST</code></td><td>Download, load and unload via its REST API.</td></tr>
+      <tr><td>OpenAI-compatible</td><td><code>OPENAI_COMPAT_HOST</code></td><td>Jan, LocalAI, and other <code>/v1</code> servers.</td></tr>
+      <tr><td>Moonshot AI (Kimi)</td><td><code>MOONSHOT_API_KEY</code></td><td><strong>Hosted</strong>: only used when named explicitly.</td></tr>
     </table>
 
-    <h2>Tools (16)</h2>
+    <h2>Tools (19)</h2>
     <div class="grid">
-      <div class="card"><h3>list_providers</h3><p>Runtimes, host, live status, capabilities.</p></div>
-      <div class="card"><h3>list_models</h3><p>Installed models across providers.</p></div>
-      <div class="card"><h3>list_loaded</h3><p>Models resident in memory.</p></div>
-      <div class="card"><h3>model_info</h3><p>Detailed model metadata.</p></div>
-      <div class="card"><h3>pull_model <span class="pill heavy">heavy</span></h3><p>Download a model (multiple GB).</p></div>
-      <div class="card"><h3>remove_model <span class="pill danger">destructive</span></h3><p>Delete a model; requires confirm.</p></div>
-      <div class="card"><h3>load_model</h3><p>Load a model into memory.</p></div>
-      <div class="card"><h3>unload_model</h3><p>Evict a model from memory.</p></div>
-      <div class="card"><h3>health_check</h3><p>Liveness and version per provider.</p></div>
-      <div class="card"><h3>system_resources</h3><p>RAM, CPU, and GPU/VRAM.</p></div>
-      <div class="card"><h3>fit_check</h3><p>Does weight + KV cache fit in VRAM or RAM?</p></div>
-      <div class="card"><h3>benchmark <span class="pill heavy">heavy</span></h3><p>Latency and tokens/sec.</p></div>
-      <div class="card"><h3>search_available</h3><p>Search a curated model catalog.</p></div>
-      <div class="card"><h3>suggest_model</h3><p>Recommend by task and hardware fit.</p></div>
-      <div class="card"><h3>complete</h3><p>Delegate a completion (streaming).</p></div>
-      <div class="card"><h3>embed</h3><p>Delegate embedding generation.</p></div>
+      <div class="card"><h3>delegate</h3><p>One call: pick, ready, and run the best local model for a task.</p></div>
+      <div class="card"><h3>complete</h3><p>Completion with JSON-schema output, images, context length, streaming.</p></div>
+      <div class="card"><h3>embed</h3><p>Embeddings, one vector per input.</p></div>
+      <div class="card"><h3>ensure_model</h3><p>Pull, fit-check, evict-to-fit, load, verify.</p></div>
+      <div class="card"><h3>fit_check</h3><p>gpu / partial / cpu / none, with the numbers.</p></div>
+      <div class="card"><h3>suggest_model</h3><p>Best models for a task on this machine.</p></div>
+      <div class="card"><h3>search_models</h3><p>Hugging Face GGUF search with per-quant fit.</p></div>
+      <div class="card"><h3>search_available</h3><p>Offline curated catalog.</p></div>
+      <div class="card"><h3>list_providers</h3><p>Runtimes, kind, live status, capabilities.</p></div>
+      <div class="card"><h3>list_models</h3><p>Installed models per runtime.</p></div>
+      <div class="card"><h3>list_loaded</h3><p>Resident models and VRAM use.</p></div>
+      <div class="card"><h3>model_info</h3><p>Metadata and layer architecture.</p></div>
+      <div class="card"><h3>pull_model <span class="pill heavy">heavy</span></h3><p>Download with progress.</p></div>
+      <div class="card"><h3>remove_model <span class="pill danger">destructive</span></h3><p>Asks you to confirm via elicitation.</p></div>
+      <div class="card"><h3>load_model</h3><p>Load with keep-alive and context length.</p></div>
+      <div class="card"><h3>unload_model</h3><p>Free VRAM/RAM.</p></div>
+      <div class="card"><h3>benchmark <span class="pill heavy">heavy</span></h3><p>TTFT and tokens/sec; compare models.</p></div>
+      <div class="card"><h3>health_check</h3><p>Reachability, version, runtime metrics.</p></div>
+      <div class="card"><h3>system_resources</h3><p>RAM, CPU, GPUs and VRAM.</p></div>
     </div>
 
     <h2>Install</h2>
-    <pre><code>npx @tmhs/local-ai-mcp</code></pre>
-
-    <h2>Environment variables</h2>
-    <ul class="env">
-      <li><code>OLLAMA_HOST</code> &mdash; default <code>http://localhost:11434</code></li>
-      <li><code>LMSTUDIO_HOST</code> &mdash; default <code>http://localhost:1234</code></li>
-      <li><code>LLAMACPP_HOST</code> &mdash; default <code>http://localhost:8080</code></li>
-      <li><code>OPENAI_COMPAT_HOST</code> &mdash; optional generic OpenAI-compatible <code>/v1</code> host</li>
-      <li><code>OPENAI_COMPAT_API_KEY</code> &mdash; optional Bearer for OpenAI-compat</li>
-      <li><code>MOONSHOT_API_KEY</code> &mdash; required to enable the Moonshot adapter</li>
-      <li><code>MOONSHOT_HOST</code> &mdash; default <code>https://api.moonshot.ai/v1</code></li>
-      <li><code>LOCAL_AI_REQUEST_TIMEOUT_MS</code> &mdash; default <code>120000</code></li>
-      <li><code>LOCAL_AI_DETECT_TIMEOUT_MS</code> &mdash; default <code>1500</code></li>
-      <li><code>LOCAL_AI_PULL_TIMEOUT_MS</code> &mdash; default <code>3600000</code> (1 hour)</li>
-    </ul>
+    <p><strong>Claude Code</strong></p>
+    <pre><code>claude mcp add local-ai -- npx -y @tmhs/local-ai-mcp</code></pre>
+    <p><strong>Claude Desktop:</strong> open the <code>.mcpb</code> bundle from the <a href="https://github.com/TMHSDigital/local-ai-mcp/releases/latest">latest release</a>. <strong>Any other client:</strong></p>
+    <pre><code>{ "mcpServers": { "local-ai": { "command": "npx", "args": ["-y", "@tmhs/local-ai-mcp"] } } }</code></pre>
+    <p>Configuration is through environment variables; see the <a href="https://github.com/TMHSDigital/local-ai-mcp#configuration">README</a> and <a href="https://github.com/TMHSDigital/local-ai-mcp/blob/main/.env.example">.env.example</a>.</p>
 
     <footer>
       <a href="https://github.com/TMHSDigital/local-ai-mcp">View on GitHub</a>
+      &nbsp;&middot;&nbsp; <a href="https://github.com/TMHSDigital/local-ai-mcp/discussions">Discussions</a>
       &nbsp;&middot;&nbsp; Part of the <a href="https://tmhsdigital.github.io/Developer-Tools-Directory/">TMHSDigital Developer Tools Directory</a>
       &nbsp;&middot;&nbsp; Built by TMHSDigital
     </footer>
