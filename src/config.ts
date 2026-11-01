@@ -137,7 +137,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const add = (p: ProviderInstanceConfig) => {
     if (!disabled.has(p.type) && !disabled.has(p.name)) providers.push(p);
   };
-  const optionalHost = (v: string | undefined) => (v && v.trim() ? normalizeHost(v) : undefined);
+  const optionalHost = (v: string | undefined) => (v?.trim() ? normalizeHost(v) : undefined);
 
   // Always-on local runtimes with well-known, distinct default ports.
   add({ type: "ollama", name: "ollama", host: normalizeHost(env.OLLAMA_HOST ?? "http://localhost:11434") });

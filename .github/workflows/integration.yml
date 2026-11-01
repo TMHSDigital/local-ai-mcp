@@ -1,0 +1,70 @@
+name: Integration (real runtimes)
+
+# Runs the adapters against real, pinned runtime versions to catch API drift
+# that the mocked unit tests cannot see. Not part of PR CI (slow, needs
+# network); runs nightly and on demand, and opens an issue when it fails.
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  # Bump these deliberately; each bump is an integration test of that release.
+  OLLAMA_IMAGE: ollama/ollama:0.40.13
+  LLAMACPP_IMAGE: ghcr.io/ggml-org/llama.cpp:server-b12019
+  CHAT_MODEL: smollm2:135m
+  EMBED_MODEL: all-minilm:22m
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      - name: Start Ollama
+        run: |
+          docker run -d --name ollama -p 11434:11434 "$OLLAMA_IMAGE"
+          for i in $(seq 1 60); do curl -sf http://localhost:11434/api/version && break; sleep 1; done
+
+      - name: Start llama.cpp server with a tiny GGUF
+        run: |
+          mkdir -p models
+          curl -sfL -o models/tiny.gguf \
+            "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf"
+          docker run -d --name llamacpp -p 8080:8080 -v "$PWD/models:/models" "$LLAMACPP_IMAGE" \
+            -m /models/tiny.gguf --host 0.0.0.0 --port 8080 --embeddings -c 2048
+          for i in $(seq 1 90); do curl -sf http://localhost:8080/health && break; sleep 1; done
+
+      - name: Run integration suite
+        run: node scripts/integration.mjs
+        env:
+          LOCAL_AI_DISABLE: lmstudio,dockermodelrunner
+
+      - name: Runtime logs
+        if: failure()
+        run: |
+          docker logs ollama | tail -50 || true
+          docker logs llamacpp | tail -50 || true
+
+      - name: Open an issue on failure
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          title="Nightly integration test failed"
+          if ! gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number' | grep -q .; then
+            gh issue create --title "$title" --label "bug,testing" \
+              --body "The nightly run against real runtimes failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. A runtime API probably changed."
+          fi

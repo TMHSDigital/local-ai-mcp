@@ -13,11 +13,19 @@ jobs:
   stale:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/stale@v10
+      - uses: actions/stale@1e223db275d687790206a7acac4d1a11bd6fe629 # v10
         with:
-          stale-issue-message: "This issue has been automatically marked as stale due to inactivity. It will be closed in 7 days if no further activity occurs."
+          # Issues: only nudge/close ones waiting on the reporter. Triaged
+          # backlog (bugs, features, prioritised work, milestones) never closes.
+          days-before-issue-stale: 90
+          days-before-issue-close: 14
+          only-issue-labels: "needs-info"
+          exempt-issue-labels: "priority: high,priority: medium,priority: low,bug,feature,enhancement,security,privacy,documentation"
+          exempt-all-milestones: true
+          stale-issue-message: "This issue has been waiting on more information for 90 days. It will be closed in 14 days unless there is new activity."
+          # PRs: unchanged behaviour.
+          days-before-pr-stale: 30
+          days-before-pr-close: 7
           stale-pr-message: "This PR has been automatically marked as stale due to inactivity. It will be closed in 7 days if no further activity occurs."
-          days-before-stale: 30
-          days-before-close: 7
           stale-issue-label: stale
           stale-pr-label: stale

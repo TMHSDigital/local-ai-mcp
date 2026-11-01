@@ -130,6 +130,7 @@ export async function httpStreamLines(
   url: string,
   opts: HttpOptions,
   accept: string,
+  // biome-ignore lint/suspicious/noConfusingVoidType: line callbacks usually return nothing; false stops the stream.
   onLine: (line: string) => boolean | void | Promise<boolean | void>,
 ): Promise<void> {
   const { method = "GET", headers = {}, body } = opts;

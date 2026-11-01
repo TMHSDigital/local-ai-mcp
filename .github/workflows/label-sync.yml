@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Get changed files
         id: changed
@@ -30,15 +30,23 @@ jobs:
         run: |
           LABELS=""
 
-          if echo "$FILES" | grep -q "^skills/"; then
-            LABELS="$LABELS skills"
+          if echo "$FILES" | grep -q "^src/providers/"; then
+            LABELS="$LABELS provider"
           fi
 
-          if echo "$FILES" | grep -q "^rules/"; then
-            LABELS="$LABELS rules"
+          if echo "$FILES" | grep -q "^src/tools/"; then
+            LABELS="$LABELS tools"
           fi
 
-          if echo "$FILES" | grep -q "^docs/"; then
+          if echo "$FILES" | grep -q "^src/hardware/"; then
+            LABELS="$LABELS hardware"
+          fi
+
+          if echo "$FILES" | grep -q "^src/__tests__/"; then
+            LABELS="$LABELS testing"
+          fi
+
+          if echo "$FILES" | grep -qE "^(docs/|README.md|CONTRIBUTING.md)"; then
             LABELS="$LABELS documentation"
           fi
 
@@ -48,7 +56,8 @@ jobs:
 
           if [ -n "$LABELS" ]; then
             for label in $LABELS; do
-              gh label create "$label" --force --color "ededed" 2>/dev/null || true
+              # Create only if missing; never overwrite an existing label's colour.
+              gh label create "$label" --color "ededed" 2>/dev/null || true
               gh pr edit ${{ github.event.pull_request.number }} --add-label "$label"
             done
             echo "Applied labels:$LABELS"

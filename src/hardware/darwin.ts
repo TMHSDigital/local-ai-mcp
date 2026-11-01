@@ -30,7 +30,7 @@ export function metalWorkingSet(memBytes: number, wiredLimitMb?: number): number
 export function parseSystemProfilerDisplays(stdout: string): GpuInfo[] {
   const data = JSON.parse(stdout) as { SPDisplaysDataType?: Array<Record<string, unknown>> };
   return (data.SPDisplaysDataType ?? []).map((d) => {
-    const vram = String(d.spdisplays_vram ?? d["spdisplays_vram_shared"] ?? "");
+    const vram = String(d.spdisplays_vram ?? d.spdisplays_vram_shared ?? "");
     const m = vram.match(/([\d.]+)\s*(GB|MB)/i);
     const bytes = m ? Number(m[1]) * (m[2].toUpperCase() === "GB" ? GiB : MiB) : undefined;
     return {

@@ -9,19 +9,72 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build-and-test:
+  checks:
+    name: Lint, typecheck, audit, manifest
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [20, 22]
     steps:
-      - uses: actions/checkout@v7
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+      - name: mcp-tools.json is up to date
+        run: |
+          npm run gen:tools
+          git diff --exit-code mcp-tools.json || {
+            echo "::error::mcp-tools.json is stale. Run 'npm run gen:tools' and commit the result."
+            exit 1
+          }
+
+  test:
+    name: Test (${{ matrix.os }}, Node ${{ matrix.node-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: [22, 24]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: npm test
+      - name: Test with coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 22
+        run: npm run test:coverage
+      - name: Test
+        if: ${{ !(matrix.os == 'ubuntu-latest' && matrix.node-version == 22) }}
+        run: npm test
+      - name: Stdio smoke test
+        run: npm run smoke
+
+  # The published package supports Node >= 20, but the test toolchain
+  # (vitest 5) needs Node 22. Build on 22, then prove the server boots on 20.
+  node20-runtime:
+    name: Runtime smoke (Node 20)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 20
+      - run: node --version && npm run smoke

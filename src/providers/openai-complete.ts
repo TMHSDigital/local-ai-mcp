@@ -212,7 +212,7 @@ export async function openAiChatComplete(
     return { text, prompt, completion, timings };
   };
 
-  let out;
+  let out: Awaited<ReturnType<typeof run>>;
   try {
     out = await run(true);
   } catch (err) {

@@ -30,6 +30,6 @@ export async function probeNvidia(run: CommandRunner): Promise<GpuInfo[]> {
     ["--query-gpu=name,memory.total,memory.free", "--format=csv,noheader,nounits"],
     { timeoutMs: PROBE_TIMEOUT_MS },
   ).catch(() => undefined);
-  if (!res || res.status !== 0 || !res.stdout.trim()) return [];
+  if (res?.status !== 0 || !res.stdout.trim()) return [];
   return parseNvidiaSmi(res.stdout);
 }

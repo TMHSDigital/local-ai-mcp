@@ -34,7 +34,7 @@ export function groupGgufFiles(siblings: Array<{ rfilename: string; size?: numbe
     const file = s.rfilename;
     if (!file.toLowerCase().endsWith(".gguf")) continue;
     if (/mmproj|imatrix/i.test(file)) continue;
-    const m = file.split("/").pop()!.match(QUANT_RE);
+    const m = (file.split("/").pop() ?? file).match(QUANT_RE);
     if (!m || !s.size) continue;
     const quant = m[1].toUpperCase();
     const entry = byQuant.get(quant) ?? { quant, sizeBytes: 0, files: [] };

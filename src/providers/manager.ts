@@ -197,7 +197,7 @@ export class ProviderManager {
         ),
       );
       const idx = loaded.indexOf(true);
-      return having[idx >= 0 ? idx : 0];
+      return having[Math.max(idx, 0)];
     }
     if (sel.allowMissing) return pool[0];
     throw new Error(
