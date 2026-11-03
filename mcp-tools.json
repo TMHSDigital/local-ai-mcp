@@ -363,6 +363,22 @@
     }
   },
   {
+    "name": "diagnostics",
+    "title": "Diagnostics",
+    "description": "One read-only snapshot for troubleshooting: the effective configuration (API keys never shown, only whether one is set), every configured provider with its detection result, latency and error, the benchmark speed cache, and how hardware was probed. Paste its output into bug reports.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true
+    }
+  },
+  {
     "name": "system_resources",
     "title": "System resources",
     "description": "Report local hardware: platform, total/available RAM, CPU count, and GPUs with total/free VRAM (NVIDIA via nvidia-smi, AMD/Intel via sysfs or the Windows registry, Apple Silicon unified memory). Each GPU names its data source.",

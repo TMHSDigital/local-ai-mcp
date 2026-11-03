@@ -232,6 +232,10 @@
       "description": "Check whether each provider is reachable and report its version (and live metrics such as vLLM KV-cache usage). Without provider, checks every configured provider, including hosted ones."
     },
     {
+      "name": "diagnostics",
+      "description": "One read-only snapshot for troubleshooting: the effective configuration (API keys never shown, only whether one is set), every configured provider with its detection result, latency and error, the benchmark speed cache, and how hardware was probed. Paste its output into bug reports."
+    },
+    {
       "name": "system_resources",
       "description": "Report local hardware: platform, total/available RAM, CPU count, and GPUs with total/free VRAM (NVIDIA via nvidia-smi, AMD/Intel via sysfs or the Windows registry, Apple Silicon unified memory). Each GPU names its data source."
     },

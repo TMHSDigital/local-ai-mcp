@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { computeFit, KV_CACHE_TYPES } from "../fit.js";
 import { sameModel } from "../model-id.js";
-import type { CompletionResult, Provider, RequestOptions } from "../providers/types.js";
+import type { CompletionResult, HealthStatus, Provider, RequestOptions } from "../providers/types.js";
 import { machineFingerprint } from "../speed-cache.js";
 import type { ToolContext } from "./context.js";
 import { aggregate, anyRecord, errMsg, type Extra, ok, perProvider, providerArg, reqOpts, safe } from "./helpers.js";
@@ -168,6 +168,82 @@ export function register(server: McpServer, ctx: ToolContext): void {
   );
 
   server.registerTool(
+    "diagnostics",
+    {
+      title: "Diagnostics",
+      description:
+        "One read-only snapshot for troubleshooting: the effective configuration (API keys never shown, only whether one is set), every configured provider with its detection result, latency and error, the benchmark speed cache, and how hardware was probed. Paste its output into bug reports.",
+      inputSchema: {},
+      outputSchema: {
+        config: anyRecord,
+        providers: z.array(anyRecord),
+        speedCache: anyRecord,
+        hardware: anyRecord,
+      },
+      annotations: { ...READ_ONLY, openWorldHint: true },
+    },
+    safe(async (_args, extra) => {
+      const opts = reqOpts(config.detectTimeoutMs, extra);
+      const keyed = new Set(config.providers.filter((p) => p.apiKey).map((p) => p.name));
+      const providers = await Promise.all(
+        manager.providers.map(async (p) => {
+          const start = Date.now();
+          const h = await p.health(opts).catch((err: unknown) => ({ live: false, error: errMsg(err) }) as Partial<HealthStatus>);
+          return {
+            name: p.name,
+            type: p.type,
+            kind: p.kind,
+            host: redactUrl(p.host),
+            apiKeyConfigured: keyed.has(p.name),
+            live: !!h.live,
+            latencyMs: Date.now() - start,
+            ...(h.version ? { version: h.version } : {}),
+            ...(h.error ? { error: h.error } : {}),
+            capabilities: p.capabilities(),
+          };
+        }),
+      );
+      const resources = await hardware.getSystemResources();
+      const machine = machineFingerprint(resources);
+      const records = ctx.speeds.all();
+      return ok({
+        config: {
+          allowHostedFallback: config.allowHostedFallback,
+          allowNetworkSearch: config.allowNetworkSearch,
+          requestTimeoutMs: config.requestTimeoutMs,
+          detectTimeoutMs: config.detectTimeoutMs,
+          pullTimeoutMs: config.pullTimeoutMs,
+          streamIdleTimeoutMs: config.streamIdleTimeoutMs,
+          streamMaxMs: config.streamMaxMs,
+          cacheTtlMs: config.cacheTtlMs,
+        },
+        providers,
+        speedCache: {
+          enabled: ctx.speeds.enabled,
+          ...(ctx.speeds.path ? { path: ctx.speeds.path } : {}),
+          entries: records.length,
+          entriesForThisMachine: records.filter((r) => r.machine === machine).length,
+          machine,
+        },
+        hardware: {
+          platform: resources.platform,
+          ramTotalBytes: resources.ramTotalBytes,
+          ramFreeBytes: resources.ramFreeBytes,
+          cpuCount: resources.cpuCount,
+          gpus: resources.gpus.map((g) => ({
+            name: g.name,
+            source: g.source,
+            ...(g.vramTotalBytes !== undefined ? { vramTotalBytes: g.vramTotalBytes } : {}),
+            ...(g.vramFreeBytes !== undefined ? { vramFreeBytes: g.vramFreeBytes } : {}),
+            ...(g.freeEstimated ? { freeEstimated: true } : {}),
+            ...(g.unified ? { unified: true } : {}),
+          })),
+        },
+      });
+    }),
+  );
+
+  server.registerTool(
     "system_resources",
     {
       title: "System resources",
@@ -297,4 +373,17 @@ export function register(server: McpServer, ctx: ToolContext): void {
       return ok({ results });
     }),
   );
+}
+
+/** A host URL with any embedded credentials masked. */
+export function redactUrl(host: string): string {
+  try {
+    const u = new URL(host);
+    if (!u.username && !u.password) return host;
+    u.username = "***";
+    u.password = "";
+    return u.toString().replace(/\/$/, "");
+  } catch {
+    return host;
+  }
 }

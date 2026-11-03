@@ -52,6 +52,7 @@ const TOOL_NAMES = [
   "unload_model",
   "ensure_model",
   "health_check",
+  "diagnostics",
   "system_resources",
   "fit_check",
   "benchmark",
@@ -236,6 +237,27 @@ describe("lifecycle", () => {
     const out = await call(client, "ensure_model", { model: "qwen3:8b", allowPull: true });
     expect(out.ready).toBe(true);
     expect(out.plan[0]).toMatch(/^pull qwen3:8b/);
+  });
+});
+
+describe("diagnostics", () => {
+  it("reports config, providers, speed cache and hardware without leaking keys", async () => {
+    const hosted = new FakeProvider("cloud", { type: "moonshot", kind: "hosted" });
+    const down = new FakeProvider("ollama");
+    down.live = false;
+    const config = { providers: [{ type: "moonshot" as const, name: "cloud", host: "https://x.test", apiKey: "sk-secret-value" }] };
+    const { client } = await connect([down, hosted], { config });
+    const res = await client.callTool({ name: "diagnostics", arguments: {} });
+    const out = res.structuredContent as Record<string, any>;
+    expect(JSON.stringify(res)).not.toContain("sk-secret-value");
+    expect(out.providers).toEqual([
+      expect.objectContaining({ name: "ollama", kind: "local", live: false, apiKeyConfigured: false }),
+      expect.objectContaining({ name: "cloud", kind: "hosted", live: true, apiKeyConfigured: true }),
+    ]);
+    expect(out.providers[0].latencyMs).toBeTypeOf("number");
+    expect(out.config).toMatchObject({ allowHostedFallback: false });
+    expect(out.speedCache).toMatchObject({ enabled: false, entries: 0 });
+    expect(out.hardware.gpus[0]).toMatchObject({ name: "gpu", source: "t" });
   });
 });
 

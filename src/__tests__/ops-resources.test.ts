@@ -243,3 +243,11 @@ describe("resources and prompts", () => {
     expect(await text("pick-model", { task: "vision" })).toContain('"vision"');
   });
 });
+
+describe("redactUrl", () => {
+  it("masks credentials embedded in a host URL", async () => {
+    const { redactUrl } = await import("../tools/ops.js");
+    expect(redactUrl("http://user:pass@host:8000/v1")).toBe("http://***@host:8000/v1");
+    expect(redactUrl("http://localhost:11434")).toBe("http://localhost:11434");
+  });
+});

@@ -85,7 +85,7 @@ You can run more than one instance of a runtime, for example a second Ollama box
 
 - Each provider is either **local** or **hosted**. The kind is inferred from its host: loopback, private LAN ranges, `*.local`, Tailscale CGNAT and `host.docker.internal` count as local. You can override it per instance in `LOCAL_AI_PROVIDERS`.
 - With no `provider` argument, `complete`, `embed`, `delegate`, `benchmark`, `load_model` and the other model-scoped tools only consider **live local** providers that have the model. If the model exists only on a hosted provider, the call fails and tells you how to opt in.
-- Hosted providers are never probed on routine calls. Only `health_check` contacts them.
+- Hosted providers are never probed on routine calls. Only `health_check` and `diagnostics` contact them.
 - `search_models` with `source: "huggingface"` queries the Hugging Face Hub, and only when you ask it to. Set `LOCAL_AI_DISABLE_NETWORK_SEARCH=1` to forbid it.
 - The server uses **stdio only**. It never opens a network listener.
 
@@ -104,6 +104,7 @@ Every tool declares MCP annotations (read-only, destructive, open-world) and an 
 | | `load_model` / `unload_model` | One provider, with optional `keepAlive` and `contextLength` |
 | | `ensure_model` | Pull (if allowed), fit check, evict others (`lru` / `all`), load and verify. `dryRun` returns the plan only |
 | Ops | `health_check` | Reachability, version, runtime metrics |
+| | `diagnostics` | Effective config (keys redacted), per-provider detection with latency and errors, speed cache, hardware probe sources. Paste it into bug reports |
 | | `system_resources` | RAM and GPUs (NVIDIA, AMD, Intel, Apple Silicon), each tagged with its data source |
 | | `fit_check` | Returns `gpu` / `partial` / `cpu` / `none` for a model at a given context length and KV-cache precision |
 | | `benchmark` | **Heavy.** Warmup, then N runs: time-to-first-token, generation and prompt tokens/sec. `models: [...]` to compare |
@@ -140,7 +141,7 @@ Every setting is an environment variable, and blank means the default. See [`.en
 
 ## Troubleshooting
 
-- **A provider isn't detected.** Run `health_check`. Check the host and port. From WSL, use the Windows host IP. From a container, use `host.docker.internal`. For Docker Model Runner, enable host-side TCP support.
+- **A provider isn't detected.** Run `diagnostics` (or `health_check`). Check the host and port. From WSL, use the Windows host IP. From a container, use `host.docker.internal`. For Docker Model Runner, enable host-side TCP support.
 - **LM Studio pull/load fails with "requires the lms CLI".** Install the `lms` CLI as described in the [LM Studio CLI docs](https://lmstudio.ai/docs/cli) so it is on `PATH`, then restart your MCP client.
 - **llama.cpp `embed` fails.** Start `llama-server` with `--embeddings` and an embedding-capable model.
 - **Answers about long inputs look truncated (Ollama).** Pass `contextLength` (it sets `num_ctx`). The result includes a warning when truncation is likely.
