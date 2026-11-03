@@ -324,6 +324,71 @@ describe("delegate", () => {
     );
   });
 
+  describe("fallback", () => {
+    const twoModels = () => {
+      const p = new FakeProvider("ollama", {
+        models: [
+          { id: "qwen2.5:14b", sizeBytes: 9 * GB },
+          { id: "llama3.1:8b", sizeBytes: 4.9 * GB },
+        ],
+      });
+      const real = p.complete.bind(p);
+      p.complete = async (params, opts) => {
+        if (params.model === "qwen2.5:14b") {
+          p.calls.push({ op: "complete", model: params.model });
+          throw new Error("model failed to load: out of memory");
+        }
+        return real(params, opts);
+      };
+      return p;
+    };
+
+    it("tries the next ranked candidate and records the failed attempt", async () => {
+      const p = twoModels();
+      const { client } = await connect([p]);
+      const out = await call(client, "delegate", { task: "chat", prompt: "hi", stream: false, fallback: true });
+      expect(out.routing.model).toBe("llama3.1:8b");
+      expect(out.routing.attempts).toEqual([
+        { provider: "ollama", model: "qwen2.5:14b", error: "model failed to load: out of memory" },
+      ]);
+    });
+
+    it("does not fall back unless asked", async () => {
+      const p = twoModels();
+      const { client } = await connect([p]);
+      await expect(call(client, "delegate", { task: "chat", prompt: "hi", stream: false })).rejects.toThrow(/out of memory/);
+      expect(p.calls.filter((c) => c.op === "complete")).toHaveLength(1);
+    });
+
+    it("does not retry after output has streamed", async () => {
+      const p = new FakeProvider("ollama", {
+        models: [
+          { id: "qwen2.5:14b", sizeBytes: 9 * GB },
+          { id: "llama3.1:8b", sizeBytes: 4.9 * GB },
+        ],
+      });
+      p.complete = async (params, opts) => {
+        p.calls.push({ op: "complete", model: params.model });
+        await opts.onChunk?.({ text: "partial", done: false });
+        throw new Error("connection reset");
+      };
+      const { client } = await connect([p]);
+      await expect(call(client, "delegate", { task: "chat", prompt: "hi", fallback: true })).rejects.toThrow(/connection reset/);
+      expect(p.calls.filter((c) => c.op === "complete")).toHaveLength(1);
+    });
+
+    it("reports every attempt when all candidates fail", async () => {
+      const p = new FakeProvider("ollama", { models: [{ id: "a:7b", sizeBytes: 4 * GB }, { id: "b:7b", sizeBytes: 4 * GB }] });
+      p.complete = async (params) => {
+        throw new Error(`boom ${params.model}`);
+      };
+      const { client } = await connect([p]);
+      await expect(call(client, "delegate", { task: "chat", prompt: "hi", stream: false, fallback: true })).rejects.toThrow(
+        /All 2 delegate attempts failed.*boom a:7b.*boom b:7b|All 2 delegate attempts failed.*boom b:7b.*boom a:7b/,
+      );
+    });
+  });
+
   it("fails helpfully when nothing suitable is installed", async () => {
     const { client } = await connect([new FakeProvider("ollama", { models: ["nomic-embed-text"] })]);
     await expect(call(client, "delegate", { task: "vision", prompt: "x" })).rejects.toThrow(/allowPull/);

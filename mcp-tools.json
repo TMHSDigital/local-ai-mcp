@@ -1085,6 +1085,10 @@
           "type": "number",
           "exclusiveMinimum": 0
         },
+        "fallback": {
+          "description": "If the chosen model fails before producing output (load error, runtime crash, timeout), try the next ranked candidate, up to 3 attempts. Failed attempts are listed in routing.attempts (default false)",
+          "type": "boolean"
+        },
         "provider": {
           "type": "string",
           "enum": [

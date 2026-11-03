@@ -16,7 +16,7 @@ import type {
 import { rankSuggestions } from "./catalog.js";
 import { machineFingerprint, type SpeedCache, type SpeedRecord } from "../speed-cache.js";
 import type { ToolContext } from "./context.js";
-import { anyRecord, type Extra, ok, progressSender, providerArg, reqOpts, safe } from "./helpers.js";
+import { anyRecord, errMsg, type Extra, ok, progressSender, providerArg, reqOpts, safe } from "./helpers.js";
 import { ensureModel } from "./lifecycle.js";
 
 const contentPart = z.union([
@@ -135,6 +135,8 @@ async function runCompletion(
   model: string,
   args: GenerationArgs,
   extra: Extra | undefined,
+  /** Set to true once any output reached the client, so a retry would duplicate it. */
+  state: { emitted: boolean } = { emitted: false },
 ): Promise<CompletionResult> {
   const { config } = ctx;
   const { stream, ...gen } = args;
@@ -143,6 +145,7 @@ async function runCompletion(
   let progress = 0;
   const onChunk = wantStream
     ? async (chunk: { text: string; done: boolean }) => {
+        if (chunk.text) state.emitted = true;
         if (!chunk.text || !send) return;
         progress += 1;
         await send(progress, undefined, chunk.text);
@@ -184,6 +187,9 @@ const TASK_TAG: Record<DelegateTask, CatalogTask> = {
   vision: "vision",
   general: "general",
 };
+
+/** With `fallback`, at most this many ranked candidates are tried. */
+export const MAX_DELEGATE_ATTEMPTS = 3;
 
 /** Tasks a general chat model can stand in for when no specialist is present. */
 const GENERAL_OK = new Set<DelegateTask>(["chat", "summarize", "extract", "general", "reasoning", "code"]);
@@ -497,6 +503,12 @@ export function register(server: McpServer, ctx: ToolContext): void {
           .optional()
           .describe("Allow hosted providers as a fallback after local ones. false always excludes them; omitted follows LOCAL_AI_ALLOW_HOSTED_FALLBACK"),
         maxSizeBytes: z.number().positive().optional().describe("Ignore models larger than this"),
+        fallback: z
+          .boolean()
+          .optional()
+          .describe(
+            `If the chosen model fails before producing output (load error, runtime crash, timeout), try the next ranked candidate, up to ${MAX_DELEGATE_ATTEMPTS} attempts. Failed attempts are listed in routing.attempts (default false)`,
+          ),
         provider: providerArg(ctx, "Restrict to one provider").optional(),
       },
       outputSchema: {
@@ -507,7 +519,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    safe(async ({ task, allowPull, allowHosted, maxSizeBytes, provider, ...gen }, extra) => {
+    safe(async ({ task, allowPull, allowHosted, maxSizeBytes, fallback, provider, ...gen }, extra) => {
       requireInput(gen as GenerationArgs);
       const detectOpts = reqOpts(config.detectTimeoutMs, extra);
       const opts = reqOpts(config.requestTimeoutMs, extra);
@@ -543,16 +555,38 @@ export function register(server: McpServer, ctx: ToolContext): void {
           ranked = [pick, ...ranked];
         }
       }
-      const chosen = ranked[0];
-      if (!chosen) {
+      if (ranked.length === 0) {
         throw new Error(
           `No suitable local model for task "${task}" on ${pool.map((p) => p.name).join(", ") || "any live provider"}. ` +
             (tooBig > 0 ? `${tooBig} installed model(s) were skipped because they do not fit this machine's memory. ` : "") +
             `Install a smaller one (see suggest_model), or pass allowPull:true.`,
         );
       }
+      // Try candidates in rank order. Without `fallback` only the first runs.
+      // Never retry once output has streamed, or after the caller cancelled.
+      const attempts: Array<{ provider: string; model: string; error: string }> = [];
+      const limit = fallback ? Math.min(MAX_DELEGATE_ATTEMPTS, ranked.length) : 1;
+      let chosen = ranked[0];
+      let result: CompletionResult | undefined;
+      for (let i = 0; i < limit; i++) {
+        chosen = ranked[i];
+        const state = { emitted: false };
+        try {
+          result = await runCompletion(ctx, chosen.provider, chosen.model, gen as GenerationArgs, extra, state);
+          break;
+        } catch (err) {
+          attempts.push({ provider: chosen.provider.name, model: chosen.model, error: errMsg(err) });
+          if (i === limit - 1 || state.emitted || extra?.signal?.aborted) {
+            if (attempts.length > 1) {
+              const tried = attempts.map((a) => `${a.provider}/${a.model}: ${a.error}`).join("; ");
+              throw new Error(`All ${attempts.length} delegate attempts failed. ${tried}`);
+            }
+            throw err;
+          }
+        }
+      }
+      if (!result) throw new Error("delegate: no completion result");
       const why = explainChoice(chosen, ranked, TASK_TAG[task]);
-      const result = await runCompletion(ctx, chosen.provider, chosen.model, gen as GenerationArgs, extra);
       return ok({
         ...result,
         routing: {
@@ -562,6 +596,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
           tier: chosen.tier,
           why,
           pulled,
+          ...(attempts.length > 0 ? { attempts } : {}),
           considered: ranked.slice(0, 5).map((c) => ({ provider: c.provider.name, model: c.model, tier: c.tier, specialist: c.specialist })),
         },
       });
