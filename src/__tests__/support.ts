@@ -136,6 +136,8 @@ export interface OllamaHost {
   tags: string[];
   /** Weight size per model (default 2 GB). */
   sizes?: Record<string, number>;
+  /** Parameter size per model, e.g. "7.6B" (default 3.2B). */
+  params?: Record<string, string>;
   ps?: Array<{ name: string; size?: number; size_vram: number; context_length?: number }>;
   tagsStatus?: number;
   /** Final /api/chat chunk timings (ns) and counts. */
@@ -163,7 +165,7 @@ export function serveOllama(hosts: Record<string, OllamaHost>) {
             models: h.tags.map((name) => ({
               name,
               size: h.sizes?.[name] ?? 2 * GB,
-              details: { family: "llama", parameter_size: "3.2B", quantization_level: "Q4_K_M" },
+              details: { family: "llama", parameter_size: h.params?.[name] ?? "3.2B", quantization_level: "Q4_K_M" },
             })),
           },
         };

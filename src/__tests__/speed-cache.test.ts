@@ -11,7 +11,7 @@ import {
   type SpeedRecord,
   staleReason,
 } from "../speed-cache.js";
-import { type Candidate, rankCandidates, rankingReason } from "../tools/delegation.js";
+import { type Candidate, modelScale, rankCandidates, rankingReason, sizeTiers } from "../tools/delegation.js";
 import {
   FakeProvider,
   GB,
@@ -168,72 +168,107 @@ describe("SpeedCache", () => {
   });
 });
 
-describe("rankCandidates with measured speed", () => {
+describe("rankCandidates: size tiers first, measured speed breaks ties", () => {
   const p = new FakeProvider("ollama");
-  const cand = (model: string, over: Partial<Candidate> = {}): Candidate => ({
+  const cand = (model: string, b: number, over: Partial<Candidate> = {}): Candidate => ({
     provider: p,
     model,
     tier: "installed",
     specialist: false,
-    sizeBytes: GB,
+    parameterBillions: b,
     ...over,
   });
+  const order = (cs: Candidate[]) => rankCandidates(cs).map((c) => c.model);
 
-  it("puts measured models first (fastest first), then falls back to size", () => {
-    const ranked = rankCandidates([
-      cand("big", { sizeBytes: 40 * GB }),
-      cand("slow", { speed: rec({ genTokensPerSec: 12 }) }),
-      cand("fast", { speed: rec({ genTokensPerSec: 90 }) }),
-      cand("mid", { sizeBytes: 8 * GB }),
+  it("a measured small model never outranks an unmeasured model from a higher tier", () => {
+    expect(order([cand("small-fast", 3, { speed: rec({ genTokensPerSec: 400 }) }), cand("large", 70)])).toEqual([
+      "large",
+      "small-fast",
     ]);
-    expect(ranked.map((c) => c.model)).toEqual(["fast", "slow", "big", "mid"]);
+    expect(order([cand("mid-fast", 7, { speed: rec({ genTokensPerSec: 90 }) }), cand("big", 8.6)])).toEqual([
+      "big",
+      "mid-fast",
+    ]);
   });
 
-  it("never lets speed override specialty or readiness", () => {
-    const ranked = rankCandidates([
-      cand("fast-installed", { speed: rec({ genTokensPerSec: 200 }) }),
-      cand("loaded", { tier: "loaded" }),
-      cand("coder", { specialist: true }),
+  it("inside a tier, the faster measured model wins, even if slightly smaller", () => {
+    expect(
+      order([
+        cand("slow-8b", 8, { speed: rec({ genTokensPerSec: 30 }) }),
+        cand("fast-7b", 7.2, { speed: rec({ genTokensPerSec: 55 }) }),
+      ]),
+    ).toEqual(["fast-7b", "slow-8b"]);
+  });
+
+  it("inside a tier, measured beats unmeasured; unmeasured ties go to the larger model", () => {
+    expect(order([cand("unmeasured-8b", 8), cand("measured-7b", 7, { speed: rec({ genTokensPerSec: 10 }) })])).toEqual([
+      "measured-7b",
+      "unmeasured-8b",
     ]);
-    expect(ranked.map((c) => c.model)).toEqual(["coder", "loaded", "fast-installed"]);
+    expect(order([cand("7b", 7), cand("8b", 8)])).toEqual(["8b", "7b"]);
+  });
+
+  it("groups tiers from the largest model down, ~20% wide", () => {
+    const cs = [cand("a", 10), cand("b", 9), cand("c", 8.4), cand("d", 8.3), cand("e", 3)];
+    const tiers = sizeTiers(cs);
+    expect(cs.map((c) => tiers.get(c))).toEqual([0, 0, 0, 1, 2]);
+  });
+
+  it("estimates scale from weight size when the parameter count is unknown", () => {
+    expect(modelScale({ parameterBillions: 7 })).toBe(7);
+    expect(modelScale({ sizeBytes: 4.5e9 })).toBeCloseTo(8, 5);
+    expect(modelScale({})).toBe(0);
+  });
+
+  it("never lets size or speed override specialty or readiness", () => {
+    expect(
+      order([
+        cand("fast-installed-70b", 70, { speed: rec({ genTokensPerSec: 200 }) }),
+        cand("loaded-3b", 3, { tier: "loaded" }),
+        cand("coder-1b", 1, { specialist: true }),
+      ]),
+    ).toEqual(["coder-1b", "loaded-3b", "fast-installed-70b"]);
   });
 
   it("explains the ranking", () => {
-    const fast = cand("fast", { speed: rec({ genTokensPerSec: 90, estimated: true }) });
-    expect(rankingReason(fast, [fast])).toBe("ranked by measured speed: 90 tok/s on this machine (benchmark 2026-11-03, estimated)");
-    const big = cand("big");
-    expect(rankingReason(big, [big])).toMatch(/ranked by size: no fresh benchmark/);
-    expect(rankingReason(big, [big, fast])).toMatch(/ranked by size: outranks benchmarked models/);
+    const fast = cand("fast", 7.2, { speed: rec({ genTokensPerSec: 90, estimated: true }) });
+    const peer = cand("peer", 8);
+    expect(rankingReason(fast, [fast, peer])).toBe(
+      "size tier tie broken by measured speed: 90 tok/s on this machine (benchmark 2026-11-03, estimated)",
+    );
+    expect(rankingReason(peer, [peer, cand("other", 7)])).toMatch(/tie broken by size: no fresh benchmark/);
+    const big = cand("big", 70);
+    expect(rankingReason(big, [big, fast])).toBe("largest size tier among equally suited and ready models");
   });
 });
 
 describe("benchmark -> delegate (HTTP layer)", () => {
-  const hosts = (): Record<string, OllamaHost> => ({
+  // fast:3b is a lower size tier; quick:7b and slow:7b share a tier (7.0B vs 7.6B).
+  const hosts = (ps: OllamaHost["ps"] = []): Record<string, OllamaHost> => ({
     [LOCAL]: {
       live: true,
-      tags: ["fast:3b", "slow:7b"],
-      sizes: { "fast:3b": 2 * GB, "slow:7b": 5 * GB },
-      ps: [{ name: "fast:3b", size_vram: 2 * GB, context_length: 8192 }],
+      tags: ["fast:3b", "quick:7b", "slow:7b"],
+      sizes: { "fast:3b": 2 * GB, "quick:7b": 4.4 * GB, "slow:7b": 5 * GB },
+      params: { "fast:3b": "3.2B", "quick:7b": "7.0B", "slow:7b": "7.6B" },
+      ps,
       chat: { eval_count: 100, eval_duration: 1e9 },
     },
     "http://192.168.1.20:11434": { live: false, tags: [] },
     [HOSTED]: { live: true, tags: ["big:70b"], chat: { eval_count: 100, eval_duration: 1e8 } },
   });
 
-  async function setup(now = () => NOW) {
-    serveOllama(hosts());
+  async function setup(now = () => NOW, ps: OllamaHost["ps"] = []) {
+    serveOllama(hosts(ps));
     const speeds = new SpeedCache(join(dir, "b.json"), now);
     const { client } = await connectFromEnv(OLLAMA_ENV, hw, speeds);
-    return { client, speeds };
+    const measure = (model: string, genTokensPerSec: number) =>
+      speeds.record({ machine: machineFingerprint(hw), host: LOCAL, provider: "ollama", model, genTokensPerSec, estimated: false });
+    const delegate = async () => (await callTool(client, "delegate", { task: "chat", prompt: "hi", stream: false })).out.routing;
+    return { client, speeds, measure, delegate };
   }
 
-  it("ranks by size until a benchmark exists, then by measured speed", async () => {
-    const { client, speeds } = await setup();
-    const before = await callTool(client, "delegate", { task: "chat", prompt: "hi", stream: false });
-    // fast:3b wins on readiness (loaded); nothing is benchmarked yet.
-    expect(before.out.routing.model).toBe("fast:3b");
-    expect(before.out.routing.why).toMatch(/ranked by size: no fresh benchmark/);
-
+  it("records benchmarks with quant, size, and running context", async () => {
+    const { client, speeds } = await setup(undefined, [{ name: "fast:3b", size_vram: 2 * GB, context_length: 8192 }]);
     await callTool(client, "benchmark", { model: "slow:7b", runs: 1, warmup: false });
     const [saved] = speeds.all();
     expect(saved).toMatchObject({
@@ -247,46 +282,33 @@ describe("benchmark -> delegate (HTTP layer)", () => {
       machine: machineFingerprint(hw),
     });
     expect(saved).not.toHaveProperty("contextLength"); // slow:7b is not loaded
-
     await callTool(client, "benchmark", { model: "fast:3b", runs: 1, warmup: false });
     expect(speeds.all().find((r) => r.model === "fast:3b")?.contextLength).toBe(8192);
   });
 
-  it("explains a measured-speed pick in routing.why without changing the output shape", async () => {
-    const { client, speeds } = await setup();
-    const before = await callTool(client, "delegate", { task: "chat", prompt: "hi", stream: false });
-    speeds.record({
-      machine: machineFingerprint(hw),
-      host: LOCAL,
-      provider: "ollama",
-      model: "fast:3b",
-      genTokensPerSec: 33.3,
-      estimated: false,
-    });
-    const after = await callTool(client, "delegate", { task: "chat", prompt: "hi", stream: false });
-    expect(after.out.routing.model).toBe("fast:3b");
-    expect(after.out.routing.why).toContain("ranked by measured speed: 33.3 tok/s on this machine (benchmark 2026-11-03)");
-    expect(Object.keys(after.out.routing).sort()).toEqual(Object.keys(before.out.routing).sort());
+  it("measured small model vs unmeasured large model: the large model wins", async () => {
+    const { measure, delegate } = await setup();
+    measure("fast:3b", 500);
+    const routing = await delegate();
+    expect(routing.model).toBe("slow:7b");
+    expect(routing.why).toMatch(/tie broken by size: no fresh benchmark/);
   });
 
-  it("ignores stale results and falls back to size", async () => {
+  it("two measured models in the same tier: the faster wins, and stale results stop counting", async () => {
     let now = NOW;
-    const { client, speeds } = await setup(() => now);
-    serveOllama({ ...hosts(), [LOCAL]: { ...hosts()[LOCAL], ps: [] } });
-    speeds.record({
-      machine: machineFingerprint(hw),
-      host: LOCAL,
-      provider: "ollama",
-      model: "fast:3b",
-      genTokensPerSec: 500,
-      estimated: false,
-    });
-    const fresh = await callTool(client, "delegate", { task: "chat", prompt: "hi", stream: false });
-    expect(fresh.out.routing.model).toBe("fast:3b");
+    const { measure, delegate } = await setup(() => now);
+    const before = await delegate();
+    measure("slow:7b", 20);
+    measure("quick:7b", 33.3);
+    const after = await delegate();
+    expect(after.model).toBe("quick:7b");
+    expect(after.why).toContain("size tier tie broken by measured speed: 33.3 tok/s on this machine (benchmark 2026-11-03)");
+    expect(Object.keys(after).sort()).toEqual(Object.keys(before).sort());
+
     now += 15 * DAY;
-    const stale = await callTool(client, "delegate", { task: "chat", prompt: "hi", stream: false });
-    expect(stale.out.routing.model).toBe("slow:7b");
-    expect(stale.out.routing.why).toMatch(/ranked by size: no fresh benchmark/);
+    const stale = await delegate();
+    expect(stale.model).toBe("slow:7b");
+    expect(stale.why).toMatch(/tie broken by size: no fresh benchmark/);
   });
 
   it("does not record hosted benchmarks", async () => {

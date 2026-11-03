@@ -112,7 +112,7 @@ Every tool declares MCP annotations (read-only, destructive, open-world) and an 
 | | `search_models` | Live Hugging Face GGUF search with per-quantization fit and pull references (`hf.co/<repo>:<quant>`) |
 | Delegation | `complete` | Run a completion on a model you choose: system prompt, JSON / JSON-schema output (validated), seed, sampling, images, `contextLength` |
 | | `embed` | Embeddings, always one vector per input |
-| | `delegate` | **One call:** picks the best local model for a task (loaded, then installed and fitting, then optionally pulled; among equals, fastest as measured by `benchmark` on this machine), runs it, and explains the choice |
+| | `delegate` | **One call:** picks the best local model for a task (loaded, then installed and fitting, then optionally pulled; larger size tiers first, with speed measured by `benchmark` on this machine breaking ties within a tier), runs it, and explains the choice |
 
 **Resources:** `local-ai://system`, `local-ai://loaded` (subscribable; updates when models load or unload), and `local-ai://models/{provider}`.
 **Prompts:** `setup`, `free-vram`, `benchmark-my-models`, `pick-model`.

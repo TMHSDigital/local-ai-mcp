@@ -9,6 +9,11 @@ tags that version and publishes it.
 
 ### Fixed
 
+- `delegate` ranks by size tier before speed. Models within ~20% parameter
+  count form one tier (scale is estimated from file size when the runtime does
+  not report it); fresh benchmarked tok/s only breaks ties inside a tier, so a
+  small measured model no longer outranks a larger unmeasured one.
+  `routing.why` says whether speed or size settled the tie.
 - `publish.yml` waits for a new npm version to become readable before
   registering it in the MCP Registry, and decides whether to register from
   the Registry's own state, so a re-dispatch can finish a listing that failed

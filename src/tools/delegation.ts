@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Ajv } from "ajv";
 import { z } from "zod";
 import { findCatalog, tasksForModel, type CatalogTask } from "../catalog/models.js";
-import { computeFit } from "../fit.js";
+import { computeFit, parseParameterBillions } from "../fit.js";
 import type {
   ChatMessage,
   CompletionParams,
@@ -172,39 +172,91 @@ export interface Candidate {
   tier: "loaded" | "installed" | "pull";
   specialist: boolean;
   sizeBytes?: number;
+  /** Parameter count in billions, when the runtime or catalog reports it. */
+  parameterBillions?: number;
   fitTarget?: string;
   /** Fresh benchmark of this model on this machine, if any. */
   speed?: SpeedRecord;
 }
 
+/** Models whose scale is within this factor of a size tier's largest model share the tier. */
+export const SIZE_TIER_RATIO = 1.2;
+/** ~4.5 bits per weight (Q4_K_M): estimates scale from file size when the parameter count is unknown. */
+const BYTES_PER_PARAM_ESTIMATE = 0.5625;
+
+/** Model scale in billions of parameters: reported, else estimated from weight size, else 0. */
+export function modelScale(c: Pick<Candidate, "parameterBillions" | "sizeBytes">): number {
+  if (c.parameterBillions) return c.parameterBillions;
+  if (c.sizeBytes) return c.sizeBytes / BYTES_PER_PARAM_ESTIMATE / 1e9;
+  return 0;
+}
+
+/**
+ * Assign size tiers: walk from the largest model down; a tier holds every
+ * model within SIZE_TIER_RATIO of the tier's largest. Returns tier indexes
+ * (0 = largest) keyed by candidate.
+ */
+export function sizeTiers(cands: Candidate[]): Map<Candidate, number> {
+  const tiers = new Map<Candidate, number>();
+  const bySize = [...cands].sort((a, b) => modelScale(b) - modelScale(a));
+  let tier = -1;
+  let head = Number.POSITIVE_INFINITY;
+  for (const c of bySize) {
+    const s = modelScale(c);
+    if (tier < 0 || s * SIZE_TIER_RATIO < head) {
+      tier += 1;
+      head = s;
+    }
+    tiers.set(c, tier);
+  }
+  return tiers;
+}
+
+const READINESS = { loaded: 0, installed: 1, pull: 2 } as const;
+
 /**
  * Score candidates: a task specialist beats a general model; loaded beats
- * installed beats pull (no load cost). Within that, models with a fresh
- * benchmark on this machine come first, fastest first (measured beats
- * guessed); the rest fall back to size, larger (more capable) first.
+ * installed beats pull (no load cost). Within that, a higher size tier
+ * (models within ~20% of each other share one) wins. Fresh benchmarked speed
+ * on this machine only breaks ties inside a size tier, so a small measured
+ * model never outranks an unmeasured model from a higher tier. Remaining
+ * ties go to the larger model.
  */
 export function rankCandidates(cands: Candidate[]): Candidate[] {
-  const tier = { loaded: 0, installed: 1, pull: 2 } as const;
+  const group = (c: Candidate) => `${c.specialist ? 0 : 1}:${READINESS[c.tier]}`;
+  const tierOf = new Map<Candidate, number>();
+  const groups = new Map<string, Candidate[]>();
+  for (const c of cands) groups.set(group(c), [...(groups.get(group(c)) ?? []), c]);
+  for (const members of groups.values()) for (const [c, t] of sizeTiers(members)) tierOf.set(c, t);
+
   return [...cands].sort((a, b) => {
     if (a.specialist !== b.specialist) return a.specialist ? -1 : 1;
-    if (tier[a.tier] !== tier[b.tier]) return tier[a.tier] - tier[b.tier];
+    if (READINESS[a.tier] !== READINESS[b.tier]) return READINESS[a.tier] - READINESS[b.tier];
+    const ta = tierOf.get(a) ?? 0;
+    const tb = tierOf.get(b) ?? 0;
+    if (ta !== tb) return ta - tb;
     if (!!a.speed !== !!b.speed) return a.speed ? -1 : 1;
-    if (a.speed && b.speed) return b.speed.genTokensPerSec - a.speed.genTokensPerSec;
-    return (b.sizeBytes ?? 0) - (a.sizeBytes ?? 0);
+    if (a.speed && b.speed && a.speed.genTokensPerSec !== b.speed.genTokensPerSec) {
+      return b.speed.genTokensPerSec - a.speed.genTokensPerSec;
+    }
+    return modelScale(b) - modelScale(a);
   });
 }
 
 /** The ranking reason for the routing explanation. */
 export function rankingReason(chosen: Candidate, ranked: Candidate[]): string {
-  if (chosen.speed) {
+  const group = ranked.filter((c) => c.specialist === chosen.specialist && c.tier === chosen.tier);
+  const tiers = sizeTiers(group.includes(chosen) ? group : [...group, chosen]);
+  const peers = group.filter((c) => c !== chosen && tiers.get(c) === tiers.get(chosen));
+  if (chosen.speed && peers.length > 0) {
     const s = chosen.speed;
     const est = s.estimated ? ", estimated" : "";
-    return `ranked by measured speed: ${s.genTokensPerSec} tok/s on this machine (benchmark ${s.measuredAt.slice(0, 10)}${est})`;
+    return `size tier tie broken by measured speed: ${s.genTokensPerSec} tok/s on this machine (benchmark ${s.measuredAt.slice(0, 10)}${est})`;
   }
-  const measured = ranked.filter((c) => c.speed).length;
-  return measured > 0
-    ? "ranked by size: outranks benchmarked models by specialty or readiness"
-    : "ranked by size: no fresh benchmark on this machine (run benchmark to rank by speed)";
+  if (peers.length > 0) {
+    return "size tier tie broken by size: no fresh benchmark on this machine for the models in this tier";
+  }
+  return "largest size tier among equally suited and ready models";
 }
 
 export function register(server: McpServer, ctx: ToolContext): void {
@@ -272,7 +324,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
     {
       title: "Delegate a task to the best local model",
       description:
-        "ONE CALL to offload work locally: pick the best model for a task on THIS machine, make it ready, and run it. Prefers models already loaded (no load cost), then installed models that fit your free VRAM, then (with allowPull) the best catalog model that fits. Task specialists (coder, vision, reasoning) win over general models; among equals, models benchmarked on this machine win by measured speed (run benchmark to record it; results expire after 14 days), otherwise larger fitting models win over smaller. Never uses a hosted provider unless allowHosted is true. Returns the completion plus a 'routing' block explaining the choice.",
+        "ONE CALL to offload work locally: pick the best model for a task on THIS machine, make it ready, and run it. Prefers models already loaded (no load cost), then installed models that fit your free VRAM, then (with allowPull) the best catalog model that fits. Task specialists (coder, vision, reasoning) win over general models; then larger fitting models win, grouped into size tiers (within ~20% parameter count); inside a tier, the model benchmarked fastest on this machine wins (run benchmark to record speeds; results expire after 14 days). Never uses a hosted provider unless allowHosted is true. Returns the completion plus a 'routing' block explaining the choice.",
       inputSchema: {
         task: z.enum(DELEGATE_TASKS).describe("What kind of work this is"),
         ...generationShape,
@@ -339,6 +391,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
               tier: isLoaded ? "loaded" : "installed",
               specialist,
               sizeBytes,
+              parameterBillions: parseParameterBillions(listed?.parameterSize ?? findCatalog(m.id)?.parameterSize),
               fitTarget,
               speed:
                 p.kind === "local"
