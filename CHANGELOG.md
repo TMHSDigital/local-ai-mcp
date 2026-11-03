@@ -7,6 +7,8 @@ tags that version and publishes it.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-03
+
 ### Added
 
 - `delegate` ranks by measured speed on this machine. `benchmark` now saves

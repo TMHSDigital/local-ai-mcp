@@ -1,6 +1,6 @@
 {
   "name": "@tmhs/local-ai-mcp",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "mcpName": "io.github.TMHSDigital/local-ai-mcp",
   "description": "Run, fit, and route work to local LLMs: one MCP server for Ollama, LM Studio, llama.cpp, Docker Model Runner, MLX, vLLM, and Foundry Local, with hardware-aware model selection.",
   "type": "module",

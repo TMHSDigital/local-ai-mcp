@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "local-ai-mcp",
   "display_name": "Local AI MCP",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Run, fit, and route work to local LLMs: Ollama, LM Studio, llama.cpp, Docker Model Runner, MLX, vLLM, Foundry Local.",
   "long_description": "An operations-first control plane for the models on your own machine. Discover what is installed and loaded across runtimes, check what fits your GPU (exact KV-cache sizing, multi-GPU, Apple Silicon unified memory), pull/load/unload models, and delegate completions or embeddings to the best local model with one call. Inference never goes to a hosted API unless you configure one and name it explicitly.",
   "author": {
