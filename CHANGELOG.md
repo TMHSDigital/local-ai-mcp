@@ -7,6 +7,11 @@ tags that version and publishes it.
 
 ## [Unreleased]
 
+### Changed
+
+- Node.js 22 is now the minimum supported runtime (`engines.node >= 22`).
+  Node 20 reached end of life in April 2026; the Node 20 CI smoke job is gone.
+
 ## [0.6.1] - 2026-11-03
 
 ### Fixed

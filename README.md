@@ -159,7 +159,7 @@ npm run gen:tools   # regenerate mcp-tools.json after changing tools
 npm run smoke       # boot the built server over stdio
 ```
 
-CI runs on Linux, Windows and macOS with Node 22 and 24, plus a Node 20 runtime check. A nightly workflow tests the adapters against real Ollama and llama.cpp. See [CONTRIBUTING.md](CONTRIBUTING.md), including **Adding a runtime adapter**.
+CI runs on Linux, Windows and macOS with Node 22 (the minimum supported) and 24. A nightly workflow tests the adapters against real Ollama and llama.cpp. See [CONTRIBUTING.md](CONTRIBUTING.md), including **Adding a runtime adapter**.
 
 ## Support
 

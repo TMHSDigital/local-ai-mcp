@@ -22,7 +22,7 @@ updates:
       # Hold the TypeScript 5.x line; majors are a deliberate upgrade.
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
-      # engines is >=20; do not pull @types/node ahead of the oldest
+      # engines is >=22; do not pull @types/node ahead of the oldest
       # supported runtime.
       - dependency-name: "@types/node"
         versions: [">=23"]

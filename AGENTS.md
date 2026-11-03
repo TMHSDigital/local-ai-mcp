@@ -45,7 +45,6 @@ This is an MCP server (TypeScript, stdio only, no network listener). It contains
 
 - Lint (Biome), typecheck (src and tests), `npm audit --omit=dev --audit-level=high`, and the `mcp-tools.json` freshness check
 - Tests on Linux, Windows, and macOS with Node 22 and 24, with coverage thresholds on one leg, plus a stdio smoke test
-- A Node 20 runtime smoke job (the package supports Node 20; the test toolchain needs 22)
 
 ### `integration.yml` (nightly and manual)
 
