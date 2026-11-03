@@ -21,8 +21,8 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
           cache: npm
-      # Pinned: npm >= 11.5.1 supports trusted publishing (OIDC) and falls
-      # back to NODE_AUTH_TOKEN when no trusted publisher is configured.
+      # Pinned: npm >= 11.5.1 is required for trusted publishing (OIDC), which is
+      # the only auth this workflow uses (configured on npmjs.com for publish.yml).
       - run: npm install -g npm@11.21.1
       - run: npm ci
       - run: npm run lint
@@ -47,10 +47,6 @@ jobs:
       - name: Publish to npm
         if: steps.pub.outputs.skip == 'false'
         run: npm publish --provenance --access public
-        env:
-          # Remove once a trusted publisher is configured on npmjs.com for
-          # this repo/workflow; OIDC is then used and no token is needed.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Build Claude Desktop extension (.mcpb)
         run: |

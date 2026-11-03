@@ -13,6 +13,8 @@ tags that version and publishes it.
   registering it in the MCP Registry, and decides whether to register from
   the Registry's own state, so a re-dispatch can finish a listing that failed
   after the npm publish succeeded.
+- npm publishing uses trusted publishing (OIDC) only; the `NPM_TOKEN` secret
+  is no longer read.
 
 ## [0.6.0] - 2026-11-03
 
