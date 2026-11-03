@@ -1,7 +1,10 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { vi } from "vitest";
 import type { Config } from "../config.js";
 import { loadConfig } from "../config.js";
 import type { HardwareProbe, SystemResources } from "../hardware/index.js";
+import { createServer } from "../server.js";
 import {
   UnsupportedOperationError,
   type CompletionChunkHandler,
@@ -93,6 +96,101 @@ export function fakeHardware(r: SystemResources = resources()): HardwareProbe {
 
 export function testConfig(over: Partial<Config> = {}): Config {
   return { ...loadConfig({}), cacheTtlMs: 0, ...over };
+}
+
+/**
+ * Real server + adapters built from env-style config, connected to an MCP
+ * client in memory. Pair with mockFetch to test tools at the HTTP layer.
+ */
+export async function connectFromEnv(env: Record<string, string>, hw: SystemResources = resources()) {
+  const { server, ctx } = createServer({ ...loadConfig(env), cacheTtlMs: 0 }, { hardware: fakeHardware(hw) });
+  const client = new Client({ name: "test", version: "0" });
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(st), client.connect(ct)]);
+  return { client, ctx };
+}
+
+// Three real Ollama adapters from config: local, LAN, and one marked hosted.
+export const LOCAL = "http://localhost:11434";
+export const LAN = "http://192.168.1.20:11434";
+export const HOSTED = "https://ollama.example.com";
+export const OLLAMA_ENV = {
+  LOCAL_AI_DISABLE: "lmstudio,llamacpp,dockermodelrunner",
+  LOCAL_AI_PROVIDERS: JSON.stringify([
+    { type: "ollama", name: "lan", host: LAN },
+    { type: "ollama", name: "cloud", host: HOSTED, kind: "hosted" },
+  ]),
+};
+
+export interface OllamaHost {
+  live: boolean;
+  tags: string[];
+  /** Weight size per model (default 2 GB). */
+  sizes?: Record<string, number>;
+  ps?: Array<{ name: string; size?: number; size_vram: number; context_length?: number }>;
+  tagsStatus?: number;
+  /** Final /api/chat chunk timings (ns) and counts. */
+  chat?: { eval_count?: number; eval_duration?: number; prompt_eval_count?: number; prompt_eval_duration?: number; load_duration?: number };
+  /** Model info for /api/show (defaults to a small llama). */
+  show?: Record<string, unknown>;
+}
+
+/** Fake Ollama HTTP API for each host; unknown or dead hosts refuse connections. */
+export function serveOllama(hosts: Record<string, OllamaHost>) {
+  return mockFetch((url, init): MockReply => {
+    const base = Object.keys(hosts).find((h) => url.startsWith(h));
+    if (!base) throw new TypeError(`fetch failed: ${url}`);
+    const h = hosts[base];
+    if (!h.live) throw new TypeError("fetch failed: ECONNREFUSED");
+    const path = url.slice(base.length);
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
+    switch (path) {
+      case "/api/version":
+        return { body: { version: "0.12.0" } };
+      case "/api/tags":
+        if (h.tagsStatus) return { status: h.tagsStatus, text: "boom" };
+        return {
+          body: {
+            models: h.tags.map((name) => ({
+              name,
+              size: h.sizes?.[name] ?? 2 * GB,
+              details: { family: "llama", parameter_size: "3.2B", quantization_level: "Q4_K_M" },
+            })),
+          },
+        };
+      case "/api/ps":
+        return { body: { models: h.ps ?? [] } };
+      case "/api/generate":
+        return { body: { done: true } };
+      case "/api/show":
+        if (!h.tags.includes(body.model)) return { status: 404, body: { error: `model '${body.model}' not found` } };
+        return {
+          body: {
+            details: { family: "llama", parameter_size: "3.2B", quantization_level: "Q4_K_M" },
+            model_info: h.show ?? { "general.architecture": "llama", "llama.context_length": 131072 },
+          },
+        };
+      case "/api/chat": {
+        if (!h.tags.includes(body.model)) return { status: 404, body: { error: `model '${body.model}' not found` } };
+        const final = { done: true, message: { role: "assistant", content: "" }, ...(h.chat ?? {}) };
+        if (body.stream) {
+          return {
+            chunks: [`${JSON.stringify({ message: { role: "assistant", content: "Hello" }, done: false })}\n`, `${JSON.stringify(final)}\n`],
+          };
+        }
+        return { body: { ...final, message: { role: "assistant", content: "Hello" } } };
+      }
+      default:
+        return { status: 404, text: "not found" };
+    }
+  });
+}
+
+/** Call a tool; returns structuredContent, or the parsed error body when isError. */
+export async function callTool(client: Client, name: string, args: Record<string, unknown> = {}) {
+  const res = await client.callTool({ name, arguments: args });
+  const text = (res.content as Array<{ text: string }>)[0].text;
+  return { isError: !!res.isError, out: (res.structuredContent ?? JSON.parse(text)) as Record<string, any> };
 }
 
 /** In-memory provider for routing and tool tests. */

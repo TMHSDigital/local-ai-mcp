@@ -19,6 +19,14 @@ tags that version and publishes it.
   `LOCAL_AI_DISABLE_NETWORK_SEARCH`. A test keeps both manifests in parity
   with the env vars the server reads.
 
+### Internal
+
+- HTTP-level tests for `list_models`, `list_loaded`, `model_info` (including
+  the not-found path and hosted exclusion), `health_check`, `fit_check`,
+  `benchmark`, and the `local-ai://` resources, subscriptions, and prompts.
+  `discovery.ts`, `ops.ts`, and `resources.ts` reach 100% line coverage; the
+  coverage thresholds rise to 85/75/85/88.
+
 - CI validates `mcpb/manifest.json` with `mcpb validate`, and `release.yml`
   will not tag a version until the manifest passes, so a broken Claude Desktop
   manifest can no longer fail `publish.yml` after the release already exists.

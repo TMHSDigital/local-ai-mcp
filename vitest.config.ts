@@ -14,10 +14,10 @@ export default defineConfig({
       reporter: ["text-summary", "lcov"],
       // Ratchet: raise these as coverage improves; never lower them.
       thresholds: {
-        statements: 80,
-        branches: 70,
-        functions: 75,
-        lines: 80,
+        statements: 85,
+        branches: 75,
+        functions: 85,
+        lines: 88,
       },
     },
   },
