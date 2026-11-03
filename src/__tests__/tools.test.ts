@@ -264,6 +264,66 @@ describe("delegate", () => {
     expect(out).toMatchObject({ provider: "ollama", local: true });
   });
 
+  it("keeps hosted strictly behind installed local models, even with the fallback flag", async () => {
+    const hosted = new FakeProvider("cloud", { type: "openaicompat", kind: "hosted", models: ["gpt-x"], loaded: ["gpt-x"] });
+    const local = new FakeProvider("ollama", { models: [{ id: "llama3.1:8b", sizeBytes: 4.9 * GB }] });
+    const { client } = await connect([hosted, local], { config: { allowHostedFallback: true } });
+    const out = await call(client, "delegate", { task: "chat", prompt: "hi", stream: false });
+    expect(out).toMatchObject({ provider: "ollama", local: true });
+
+    // allowHosted:false wins over the env flag; with no local model left, nothing qualifies.
+    local.models = [];
+    await expect(call(client, "delegate", { task: "chat", prompt: "hi", allowHosted: false })).rejects.toThrow(/No suitable/);
+    const fallback = await call(client, "delegate", { task: "chat", prompt: "hi", stream: false });
+    expect(fallback.provider).toBe("cloud");
+  });
+
+  it("runs installed models on CPU when there is no usable GPU", async () => {
+    const p = new FakeProvider("ollama", { models: [{ id: "llama3.2:3b", sizeBytes: 2 * GB }] });
+    const { client } = await connect([p], { hw: resources({ gpus: [] }) });
+    const out = await call(client, "delegate", { task: "chat", prompt: "hi", stream: false });
+    expect(out.routing).toMatchObject({ model: "llama3.2:3b", tier: "installed" });
+    expect(out.routing.why).toMatch(/fits: cpu/);
+  });
+
+  it("prefers a GPU-fitting model over a CPU-only one", async () => {
+    const p = new FakeProvider("ollama", {
+      models: [
+        { id: "llama3.1:70b", sizeBytes: 40 * GB },
+        { id: "llama3.1:8b", sizeBytes: 4.9 * GB },
+      ],
+    });
+    const { client } = await connect([p], {
+      hw: resources({ ramFreeBytes: 60 * GB, gpus: [{ name: "gpu", vramFreeBytes: 2 * GB, source: "t" }] }),
+    });
+    const out = await call(client, "delegate", { task: "chat", prompt: "hi", stream: false });
+    expect(out.routing.model).toBe("llama3.1:8b");
+  });
+
+  it("never pulls a model larger than maxSizeBytes", async () => {
+    const p = new FakeProvider("ollama", { models: [{ id: "big:14b", sizeBytes: 9 * GB }] });
+    const { client } = await connect([p], { hw: resources({ gpus: [{ name: "gpu", vramFreeBytes: 24 * GB, source: "t" }] }) });
+    const out = await call(client, "delegate", { task: "chat", prompt: "hi", stream: false, allowPull: true, maxSizeBytes: 3 * GB });
+    expect(out.routing.pulled).toBe(true);
+    const pulled = p.calls.find((c) => c.op === "pull");
+    expect(pulled?.model).toBeDefined();
+    expect(out.routing.considered[0].model).toBe(pulled?.model);
+    expect(out.routing.model).not.toBe("big:14b");
+  });
+
+  it("names the reason when an explicit provider is filtered out", async () => {
+    const hosted = new FakeProvider("cloud", { type: "openaicompat", kind: "hosted", models: ["gpt-x"] });
+    const local = new FakeProvider("ollama", { models: [{ id: "llama3.1:8b", sizeBytes: 4.9 * GB }] });
+    const { client } = await connect([hosted, local]);
+    await expect(call(client, "delegate", { task: "chat", prompt: "hi", provider: "cloud" })).rejects.toThrow(
+      /is hosted; pass allowHosted:true/,
+    );
+    local.live = false;
+    await expect(call(client, "delegate", { task: "chat", prompt: "hi", provider: "ollama" })).rejects.toThrow(
+      /not reachable/,
+    );
+  });
+
   it("fails helpfully when nothing suitable is installed", async () => {
     const { client } = await connect([new FakeProvider("ollama", { models: ["nomic-embed-text"] })]);
     await expect(call(client, "delegate", { task: "vision", prompt: "x" })).rejects.toThrow(/allowPull/);

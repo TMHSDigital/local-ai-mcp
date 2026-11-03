@@ -885,7 +885,7 @@
   {
     "name": "delegate",
     "title": "Delegate a task to the best local model",
-    "description": "ONE CALL to offload work locally: pick the best model for a task on THIS machine, make it ready, and run it. Prefers models already loaded (no load cost), then installed models that fit your free VRAM, then (with allowPull) the best catalog model that fits. Task specialists (coder, vision, reasoning) win over general models; then larger fitting models win, grouped into size tiers (within ~20% parameter count); inside a tier, the model benchmarked fastest on this machine wins (run benchmark to record speeds; results expire after 14 days). Never uses a hosted provider unless allowHosted is true. Returns the completion plus a 'routing' block explaining the choice.",
+    "description": "ONE CALL to offload work locally: pick the best model for a task on THIS machine, make it ready, and run it. Prefers models already loaded (no load cost), then installed models that fit your free VRAM, then (with allowPull) the best catalog model that fits. Task specialists (coder, vision, reasoning) win over general models; then larger fitting models win, grouped into size tiers (within ~20% parameter count); inside a tier, the model benchmarked fastest on this machine wins (run benchmark to record speeds; results expire after 14 days). Never uses a hosted provider unless allowHosted is true (or, when allowHosted is omitted, LOCAL_AI_ALLOW_HOSTED_FALLBACK is set), and even then any suitable local model is preferred. Models that only fit in system RAM run on CPU when nothing fits the GPU. Returns the completion plus a 'routing' block explaining the choice.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1077,7 +1077,7 @@
           "type": "boolean"
         },
         "allowHosted": {
-          "description": "Allow hosted providers (default false)",
+          "description": "Allow hosted providers as a fallback after local ones. false always excludes them; omitted follows LOCAL_AI_ALLOW_HOSTED_FALLBACK",
           "type": "boolean"
         },
         "maxSizeBytes": {

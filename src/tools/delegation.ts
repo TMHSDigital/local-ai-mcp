@@ -234,8 +234,16 @@ export function sizeTiers(cands: Candidate[]): Map<Candidate, number> {
 
 const READINESS = { loaded: 0, installed: 1, pull: 2 } as const;
 
+/** Hosted candidates only ever back up local ones; that is what "fallback" means. */
+const isLocal = (c: Candidate) => c.provider.kind === "local";
+/** CPU-only placement is a last resort behind anything that fits on the GPU. */
+const onCpu = (c: Candidate) => c.fitTarget === "cpu";
+/** Candidates that compete for size tiers and speed tie-breaks with each other. */
+const bucket = (c: Candidate) => `${isLocal(c) ? 0 : 1}:${onCpu(c) ? 1 : 0}:${c.specialist ? 0 : 1}:${READINESS[c.tier]}`;
+
 /**
- * Score candidates: a task specialist beats a general model; loaded beats
+ * Score candidates: every local candidate beats every hosted one, and
+ * GPU/partial placement beats CPU-only. Then a task specialist beats a general model; loaded beats
  * installed beats pull (no load cost). Within that, a higher size tier
  * (models within ~20% of each other share one) wins. Fresh benchmarked speed
  * on this machine only breaks ties inside a size tier, so a small measured
@@ -243,13 +251,14 @@ const READINESS = { loaded: 0, installed: 1, pull: 2 } as const;
  * ties go to the larger model.
  */
 export function rankCandidates(cands: Candidate[]): Candidate[] {
-  const group = (c: Candidate) => `${c.specialist ? 0 : 1}:${READINESS[c.tier]}`;
   const tierOf = new Map<Candidate, number>();
   const groups = new Map<string, Candidate[]>();
-  for (const c of cands) groups.set(group(c), [...(groups.get(group(c)) ?? []), c]);
+  for (const c of cands) groups.set(bucket(c), [...(groups.get(bucket(c)) ?? []), c]);
   for (const members of groups.values()) for (const [c, t] of sizeTiers(members)) tierOf.set(c, t);
 
   return [...cands].sort((a, b) => {
+    if (isLocal(a) !== isLocal(b)) return isLocal(a) ? -1 : 1;
+    if (onCpu(a) !== onCpu(b)) return onCpu(a) ? 1 : -1;
     if (a.specialist !== b.specialist) return a.specialist ? -1 : 1;
     if (READINESS[a.tier] !== READINESS[b.tier]) return READINESS[a.tier] - READINESS[b.tier];
     const ta = tierOf.get(a) ?? 0;
@@ -265,7 +274,7 @@ export function rankCandidates(cands: Candidate[]): Candidate[] {
 
 /** The ranking reason for the routing explanation. */
 export function rankingReason(chosen: Candidate, ranked: Candidate[]): string {
-  const group = ranked.filter((c) => c.specialist === chosen.specialist && c.tier === chosen.tier);
+  const group = ranked.filter((c) => bucket(c) === bucket(chosen));
   const tiers = sizeTiers(group.includes(chosen) ? group : [...group, chosen]);
   const peers = group.filter((c) => c !== chosen && tiers.get(c) === tiers.get(chosen));
   if (chosen.speed && peers.length > 0) {
@@ -344,12 +353,15 @@ export function register(server: McpServer, ctx: ToolContext): void {
     {
       title: "Delegate a task to the best local model",
       description:
-        "ONE CALL to offload work locally: pick the best model for a task on THIS machine, make it ready, and run it. Prefers models already loaded (no load cost), then installed models that fit your free VRAM, then (with allowPull) the best catalog model that fits. Task specialists (coder, vision, reasoning) win over general models; then larger fitting models win, grouped into size tiers (within ~20% parameter count); inside a tier, the model benchmarked fastest on this machine wins (run benchmark to record speeds; results expire after 14 days). Never uses a hosted provider unless allowHosted is true. Returns the completion plus a 'routing' block explaining the choice.",
+        "ONE CALL to offload work locally: pick the best model for a task on THIS machine, make it ready, and run it. Prefers models already loaded (no load cost), then installed models that fit your free VRAM, then (with allowPull) the best catalog model that fits. Task specialists (coder, vision, reasoning) win over general models; then larger fitting models win, grouped into size tiers (within ~20% parameter count); inside a tier, the model benchmarked fastest on this machine wins (run benchmark to record speeds; results expire after 14 days). Never uses a hosted provider unless allowHosted is true (or, when allowHosted is omitted, LOCAL_AI_ALLOW_HOSTED_FALLBACK is set), and even then any suitable local model is preferred. Models that only fit in system RAM run on CPU when nothing fits the GPU. Returns the completion plus a 'routing' block explaining the choice.",
       inputSchema: {
         task: z.enum(DELEGATE_TASKS).describe("What kind of work this is"),
         ...generationShape,
         allowPull: z.boolean().optional().describe("Download a catalog model if nothing suitable is installed (default false)"),
-        allowHosted: z.boolean().optional().describe("Allow hosted providers (default false)"),
+        allowHosted: z
+          .boolean()
+          .optional()
+          .describe("Allow hosted providers as a fallback after local ones. false always excludes them; omitted follows LOCAL_AI_ALLOW_HOSTED_FALLBACK"),
         maxSizeBytes: z.number().positive().optional().describe("Ignore models larger than this"),
         provider: providerArg(ctx, "Restrict to one provider").optional(),
       },
@@ -366,16 +378,29 @@ export function register(server: McpServer, ctx: ToolContext): void {
       const detectOpts = reqOpts(config.detectTimeoutMs, extra);
       const opts = reqOpts(config.requestTimeoutMs, extra);
       const tag = TASK_TAG[task];
-      const hostedOk = allowHosted || config.allowHostedFallback;
+      const hostedOk = allowHosted ?? config.allowHostedFallback;
       let pool = (await manager.detected(detectOpts)).filter(
         (p) => p.capabilities().complete && (p.kind === "local" || hostedOk),
       );
-      if (provider) pool = pool.filter((p) => p.name === provider);
+      if (provider) {
+        const named = manager.require(provider);
+        pool = pool.filter((p) => p.name === named.name);
+        if (pool.length === 0) {
+          throw new Error(
+            named.kind === "hosted" && !hostedOk
+              ? `Provider "${named.name}" is hosted; pass allowHosted:true to delegate to it.`
+              : !named.capabilities().complete
+                ? `Provider "${named.name}" does not support completions.`
+                : `Provider "${named.name}" is not reachable at ${named.host}.`,
+          );
+        }
+      }
       const resources = await hardware.getSystemResources();
       const contextLength = gen.contextLength;
       const speedOf = ctx.speeds.lookup(machineFingerprint(resources));
 
       const cands: Candidate[] = [];
+      let tooBig = 0;
       await Promise.all(
         pool.map(async (p) => {
           const [models, loaded] = await Promise.all([
@@ -403,7 +428,10 @@ export function register(server: McpServer, ctx: ToolContext): void {
                 parameterSize: listed?.parameterSize ?? findCatalog(m.id)?.parameterSize,
               });
               fitTarget = fit.target;
-              if (fit.target === "none" || fit.target === "cpu") continue;
+              if (fit.target === "none") {
+                tooBig += 1;
+                continue;
+              }
             }
             cands.push({
               provider: p,
@@ -424,22 +452,37 @@ export function register(server: McpServer, ctx: ToolContext): void {
 
       let ranked = rankCandidates(cands);
       let pulled = false;
-      if (ranked.length === 0 && allowPull) {
+      // Pull when nothing usable is installed, or when the best option is only
+      // CPU placement or a hosted provider and a download would do better.
+      const best = ranked[0];
+      if (allowPull && (!best || !isLocal(best) || onCpu(best))) {
         const puller = pool.find((p) => p.type === "ollama" && p.capabilities().pull);
-        const pick = puller
-          ? rankSuggestions(resources, tag, { contextLength }).find((s) => s.target === "gpu" || s.target === "partial")
-          : undefined;
-        if (puller && pick) {
-          await ensureModel(ctx, { model: pick.name, provider: puller.name, allowPull: true, contextLength }, extra);
+        const fits = puller
+          ? rankSuggestions(resources, tag, { contextLength }).filter(
+              (s) => !maxSizeBytes || s.approxSizeBytes <= maxSizeBytes,
+            )
+          : [];
+        // Largest model that fits the GPU; with no usable GPU, the smallest that fits in RAM.
+        const pick =
+          fits.find((s) => s.target === "gpu" || s.target === "partial") ??
+          [...fits].reverse().find((s) => s.target === "cpu");
+        const improves = !best || !isLocal(best) || pick?.target !== "cpu";
+        if (puller && pick && improves) {
+          const ready = await ensureModel(ctx, { model: pick.name, provider: puller.name, allowPull: true, contextLength }, extra);
+          if (!ready.ready) throw new Error(`Pulled ${pick.name} on ${puller.name}, but it did not become ready.`);
           pulled = true;
-          ranked = [{ provider: puller, model: pick.name, tier: "pull", specialist: pick.tasks.includes(tag), sizeBytes: pick.approxSizeBytes, fitTarget: pick.target }];
+          ranked = [
+            { provider: puller, model: pick.name, tier: "pull", specialist: pick.tasks.includes(tag), sizeBytes: pick.approxSizeBytes, fitTarget: pick.target },
+            ...ranked,
+          ];
         }
       }
       const chosen = ranked[0];
       if (!chosen) {
         throw new Error(
           `No suitable local model for task "${task}" on ${pool.map((p) => p.name).join(", ") || "any live provider"}. ` +
-            `Install one (see suggest_model), or pass allowPull:true.`,
+            (tooBig > 0 ? `${tooBig} installed model(s) were skipped because they do not fit this machine's memory. ` : "") +
+            `Install a smaller one (see suggest_model), or pass allowPull:true.`,
         );
       }
       const why = [
