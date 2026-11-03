@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { Ajv } from "ajv";
+import { Ajv, type ValidateFunction } from "ajv";
 import { z } from "zod";
 import { findCatalog, tasksForModel, type CatalogTask } from "../catalog/models.js";
 import { computeFit, parseParameterBillions } from "../fit.js";
@@ -89,13 +89,33 @@ type GenerationArgs = {
   stream?: boolean;
 };
 
-const ajv = new Ajv({ allErrors: true, strict: false });
+/**
+ * Compiled validators keyed by schema text. Each schema gets its own Ajv
+ * instance so a reused `$id` never collides, and the map is bounded so a
+ * long-lived server does not grow with every distinct schema.
+ */
+const validators = new Map<string, ValidateFunction>();
+const MAX_VALIDATORS = 64;
+
+function compileSchema(schema: unknown): ValidateFunction {
+  const key = JSON.stringify(schema);
+  const hit = validators.get(key);
+  if (hit) {
+    validators.delete(key);
+    validators.set(key, hit);
+    return hit;
+  }
+  const validate = new Ajv({ allErrors: true, strict: false }).compile(schema as object);
+  validators.set(key, validate);
+  if (validators.size > MAX_VALIDATORS) validators.delete(validators.keys().next().value as string);
+  return validate;
+}
 
 /** Validate `parsed` against a requested JSON schema; adds schemaValid/schemaErrors. */
 export function validateStructured(result: CompletionResult, format: CompletionParams["responseFormat"]): CompletionResult {
   if (format?.type !== "json_schema" || result.parsed === undefined) return result;
   try {
-    const validate = ajv.compile(format.schema);
+    const validate = compileSchema(format.schema);
     const valid = validate(result.parsed) as boolean;
     return {
       ...result,
