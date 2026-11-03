@@ -286,6 +286,15 @@ describe("benchmark -> delegate (HTTP layer)", () => {
     expect(speeds.all().find((r) => r.model === "fast:3b")?.contextLength).toBe(8192);
   });
 
+  it("matches a short-name benchmark to the runtime's :latest id", async () => {
+    const speeds = new SpeedCache(join(dir, "b.json"), () => NOW);
+    speeds.record({ machine: "m1", host: LOCAL, provider: "ollama", model: "qwen3", genTokensPerSec: 42, estimated: false });
+    expect(speeds.lookup("m1")(LOCAL, "qwen3:latest")?.genTokensPerSec).toBe(42);
+    // Re-recording under the canonical id replaces the short-name record.
+    speeds.record({ machine: "m1", host: LOCAL, provider: "ollama", model: "qwen3:latest", genTokensPerSec: 50, estimated: false });
+    expect(speeds.all()).toHaveLength(1);
+  });
+
   it("measured small model vs unmeasured large model: the large model wins", async () => {
     const { measure, delegate } = await setup();
     measure("fast:3b", 500);

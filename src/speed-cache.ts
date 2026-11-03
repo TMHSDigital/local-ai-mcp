@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node
 import os from "node:os";
 import { dirname, join } from "node:path";
 import type { SystemResources } from "./hardware/index.js";
+import { sameModel } from "./model-id.js";
 
 /** Benchmarks older than this are ignored: runtimes, drivers and models change. */
 export const SPEED_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
@@ -115,7 +116,7 @@ export class SpeedCache {
   record(rec: Omit<SpeedRecord, "measuredAt">): SpeedRecord | undefined {
     if (!this.path) return undefined;
     const entry: SpeedRecord = { ...rec, measuredAt: new Date(this.now()).toISOString() };
-    const kept = this.all().filter((r) => !(r.machine === rec.machine && r.host === rec.host && r.model === rec.model));
+    const kept = this.all().filter((r) => !(r.machine === rec.machine && r.host === rec.host && sameModel(r.model, rec.model)));
     kept.push(entry);
     kept.sort((a, b) => Date.parse(a.measuredAt) - Date.parse(b.measuredAt));
     const records = kept.slice(-MAX_RECORDS);
@@ -139,7 +140,7 @@ export class SpeedCache {
     const now = this.now();
     const mine = this.all().filter((r) => r.machine === machine);
     return (host, model, current = {}) => {
-      const rec = mine.find((r) => r.host === host && r.model === model);
+      const rec = mine.find((r) => r.host === host && sameModel(r.model, model));
       return rec && !staleReason(rec, current, now) ? rec : undefined;
     };
   }

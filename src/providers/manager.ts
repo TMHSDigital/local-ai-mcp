@@ -1,4 +1,5 @@
 import type { Config, ProviderInstanceConfig } from "../config.js";
+import { sameModel } from "../model-id.js";
 import { DockerModelRunnerProvider } from "./dockermodelrunner.js";
 import { FoundryLocalProvider } from "./foundrylocal.js";
 import { LlamaCppProvider } from "./llamacpp.js";
@@ -40,12 +41,7 @@ export function createProvider(cfg: ProviderInstanceConfig): Provider {
   }
 }
 
-/** Ollama treats "llama3" and "llama3:latest" as the same model. */
-export function sameModel(a: string, b: string): boolean {
-  if (a === b) return true;
-  const strip = (s: string) => s.replace(/:latest$/, "");
-  return strip(a) === strip(b);
-}
+export { sameModel } from "../model-id.js";
 
 interface CacheEntry<T> {
   value: T;

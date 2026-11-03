@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { computeFit, KV_CACHE_TYPES } from "../fit.js";
+import { sameModel } from "../model-id.js";
 import type { CompletionResult, Provider, RequestOptions } from "../providers/types.js";
 import { machineFingerprint } from "../speed-cache.js";
 import type { ToolContext } from "./context.js";
@@ -118,15 +119,17 @@ async function rememberSpeed(
   const genTokensPerSec = res.genTokensPerSec.median;
   if (p.kind !== "local" || genTokensPerSec === undefined) return;
   const [listed, loaded] = await Promise.all([
-    ctx.manager.listModelsCached(p, opts).then((ms) => ms.find((m) => m.id === res.model)).catch(() => undefined),
-    p.listLoaded(opts).then((ls) => ls.find((m) => m.id === res.model)).catch(() => undefined),
+    ctx.manager.listModelsCached(p, opts).then((ms) => ms.find((m) => sameModel(m.id, res.model))).catch(() => undefined),
+    p.listLoaded(opts).then((ls) => ls.find((m) => sameModel(m.id, res.model))).catch(() => undefined),
   ]);
   try {
     ctx.speeds.record({
       machine,
       host: p.host,
       provider: p.name,
-      model: res.model,
+      // Store the runtime's own id (e.g. "qwen3:latest"), which is what
+      // delegate looks up, not the short name the caller typed.
+      model: listed?.id ?? loaded?.id ?? res.model,
       genTokensPerSec,
       ...(res.ttftMs.median !== undefined ? { ttftMs: res.ttftMs.median } : {}),
       ...(loaded?.contextLength ? { contextLength: loaded.contextLength } : {}),
