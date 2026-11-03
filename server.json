@@ -55,6 +55,12 @@
           "isRequired": false
         },
         {
+          "name": "VLLM_API_KEY",
+          "description": "Bearer token for VLLM_HOST (when vLLM runs with --api-key)",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
           "name": "FOUNDRY_LOCAL_HOST",
           "description": "Foundry Local service URL (opt-in; port from `foundry service status`)",
           "isRequired": false
@@ -79,6 +85,27 @@
         {
           "name": "LOCAL_AI_ALLOW_HOSTED_FALLBACK",
           "description": "Allow implicit routing to hosted providers (default: off)",
+          "isRequired": false
+        },
+        {
+          "name": "MOONSHOT_HOST",
+          "description": "Moonshot API base URL",
+          "default": "https://api.moonshot.ai/v1",
+          "isRequired": false
+        },
+        {
+          "name": "LOCAL_AI_DISABLE",
+          "description": "Comma-separated provider names to skip probing",
+          "isRequired": false
+        },
+        {
+          "name": "LOCAL_AI_PROVIDERS",
+          "description": "JSON array of extra provider instances: {type, host, name?, apiKey?, kind?}",
+          "isRequired": false
+        },
+        {
+          "name": "LOCAL_AI_DISABLE_NETWORK_SEARCH",
+          "description": "Keep search_models offline (catalog only)",
           "isRequired": false
         }
       ]

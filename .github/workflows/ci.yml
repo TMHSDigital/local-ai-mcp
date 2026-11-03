@@ -28,11 +28,11 @@ jobs:
       - run: npm run typecheck
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
-      - name: mcp-tools.json is up to date
+      - name: mcp-tools.json and the mcpb tools list are up to date
         run: |
           npm run gen:tools
-          git diff --exit-code mcp-tools.json || {
-            echo "::error::mcp-tools.json is stale. Run 'npm run gen:tools' and commit the result."
+          git diff --exit-code mcp-tools.json mcpb/manifest.json || {
+            echo "::error::mcp-tools.json or mcpb/manifest.json is stale. Run 'npm run gen:tools' and commit the result."
             exit 1
           }
       - name: Claude Desktop manifest is valid

@@ -39,9 +39,18 @@
         "OLLAMA_HOST": "${user_config.ollama_host}",
         "LMSTUDIO_HOST": "${user_config.lmstudio_host}",
         "LLAMACPP_HOST": "${user_config.llamacpp_host}",
+        "DOCKER_MODEL_RUNNER_HOST": "${user_config.docker_model_runner_host}",
         "MLX_HOST": "${user_config.mlx_host}",
         "VLLM_HOST": "${user_config.vllm_host}",
+        "VLLM_API_KEY": "${user_config.vllm_api_key}",
+        "FOUNDRY_LOCAL_HOST": "${user_config.foundry_local_host}",
         "OPENAI_COMPAT_HOST": "${user_config.openai_compat_host}",
+        "OPENAI_COMPAT_API_KEY": "${user_config.openai_compat_api_key}",
+        "MOONSHOT_API_KEY": "${user_config.moonshot_api_key}",
+        "MOONSHOT_HOST": "${user_config.moonshot_host}",
+        "LOCAL_AI_ALLOW_HOSTED_FALLBACK": "${user_config.allow_hosted_fallback}",
+        "LOCAL_AI_DISABLE": "${user_config.disabled_providers}",
+        "LOCAL_AI_PROVIDERS": "${user_config.extra_providers}",
         "LOCAL_AI_DISABLE_NETWORK_SEARCH": "${user_config.disable_network_search}"
       }
     }
@@ -68,6 +77,13 @@
       "default": "",
       "required": false
     },
+    "docker_model_runner_host": {
+      "type": "string",
+      "title": "Docker Model Runner URL",
+      "description": "Leave blank for http://localhost:12434",
+      "default": "",
+      "required": false
+    },
     "mlx_host": {
       "type": "string",
       "title": "MLX server URL (optional)",
@@ -82,10 +98,69 @@
       "default": "",
       "required": false
     },
+    "vllm_api_key": {
+      "type": "string",
+      "title": "vLLM API key (optional)",
+      "description": "Only if vLLM was started with --api-key",
+      "default": "",
+      "required": false,
+      "sensitive": true
+    },
+    "foundry_local_host": {
+      "type": "string",
+      "title": "Foundry Local URL (optional)",
+      "description": "http://localhost:<port>, with the port from `foundry service status`",
+      "default": "",
+      "required": false
+    },
     "openai_compat_host": {
       "type": "string",
       "title": "Other OpenAI-compatible server (optional)",
       "description": "Base URL including /v1 (Jan, LocalAI, ...)",
+      "default": "",
+      "required": false
+    },
+    "openai_compat_api_key": {
+      "type": "string",
+      "title": "OpenAI-compatible server API key (optional)",
+      "description": "Bearer token for the server above",
+      "default": "",
+      "required": false,
+      "sensitive": true
+    },
+    "moonshot_api_key": {
+      "type": "string",
+      "title": "Moonshot AI (Kimi) API key (optional, hosted)",
+      "description": "Hosted: only used when a tool names provider \"moonshot\", unless hosted fallback is on",
+      "default": "",
+      "required": false,
+      "sensitive": true
+    },
+    "moonshot_host": {
+      "type": "string",
+      "title": "Moonshot API URL (optional)",
+      "description": "Leave blank for https://api.moonshot.ai/v1",
+      "default": "",
+      "required": false
+    },
+    "allow_hosted_fallback": {
+      "type": "boolean",
+      "title": "Allow hosted fallback",
+      "description": "Let calls without a provider use hosted providers (off keeps inference local)",
+      "default": false,
+      "required": false
+    },
+    "disabled_providers": {
+      "type": "string",
+      "title": "Skip runtimes (optional)",
+      "description": "Comma-separated provider names not to probe, e.g. lmstudio,dockermodelrunner",
+      "default": "",
+      "required": false
+    },
+    "extra_providers": {
+      "type": "string",
+      "title": "Extra provider instances (optional, JSON)",
+      "description": "JSON array of {type, host, name?, apiKey?, kind?}, e.g. a second Ollama on your LAN",
       "default": "",
       "required": false
     },
@@ -106,5 +181,83 @@
     "runtimes": {
       "node": ">=20.0.0"
     }
-  }
+  },
+  "tools": [
+    {
+      "name": "list_providers",
+      "description": "List configured model runtimes (Ollama, LM Studio, llama.cpp, Docker Model Runner, and any opt-in MLX / vLLM / Foundry Local / OpenAI-compatible / hosted instances) with host, kind (local or hosted), live status, and capabilities."
+    },
+    {
+      "name": "list_models",
+      "description": "List models installed/available on each live provider, keyed by provider. Pass provider to query just one."
+    },
+    {
+      "name": "list_loaded",
+      "description": "List models currently loaded into memory on each live provider, with VRAM use and context length where the runtime reports them."
+    },
+    {
+      "name": "model_info",
+      "description": "Detailed metadata for one model (family, parameter size, quantization, context length, and layer architecture where available). Without provider, queries the live local providers that have the model."
+    },
+    {
+      "name": "pull_model",
+      "description": "HEAVY: Download a model onto ONE provider (multiple GB, can take a long time). Streams download progress via MCP progress notifications when the client sends a progressToken. Without provider, uses the provider that already has the model, else the first live local provider that can pull."
+    },
+    {
+      "name": "remove_model",
+      "description": "DESTRUCTIVE: Permanently delete a model from one provider. provider is REQUIRED (no fan-out). If the client supports elicitation the user is asked to confirm directly; otherwise confirm:true is required."
+    },
+    {
+      "name": "load_model",
+      "description": "Load a model into memory on ONE provider so it is ready for inference. Optional keepAlive (e.g. '5m', '1h') and contextLength. Without provider, uses the live local provider that has the model."
+    },
+    {
+      "name": "unload_model",
+      "description": "Unload a model from memory to free VRAM/RAM on ONE provider. Without provider, uses the live local provider that has it loaded."
+    },
+    {
+      "name": "ensure_model",
+      "description": "Make a model ready in one call: optionally pull it, check it fits current free VRAM, unload other models if needed (evict: 'lru' or 'all'), load it, and verify. Use dryRun:true to get the plan without changing anything."
+    },
+    {
+      "name": "health_check",
+      "description": "Check whether each provider is reachable and report its version (and live metrics such as vLLM KV-cache usage). Without provider, checks every configured provider, including hosted ones."
+    },
+    {
+      "name": "system_resources",
+      "description": "Report local hardware: platform, total/available RAM, CPU count, and GPUs with total/free VRAM (NVIDIA via nvidia-smi, AMD/Intel via sysfs or the Windows registry, Apple Silicon unified memory). Each GPU names its data source."
+    },
+    {
+      "name": "fit_check",
+      "description": "Will a model run on this machine, and where? Uses the installed model's size and exact layer architecture when the runtime exposes it (else parameter-count or catalog estimates) to size weights + KV cache for a context length, then compares with free VRAM summed across GPUs and available RAM. Returns target gpu / partial (GPU+CPU split) / cpu / none, with the numbers and how the KV estimate was made. Credits back memory the model already uses if it is loaded."
+    },
+    {
+      "name": "benchmark",
+      "description": "HEAVY: Runs REAL inference. Measures a model on this machine with a warmup (absorbs load time) plus N streamed runs: time-to-first-token, generation tokens/sec (runtime-reported when available, else measured after the first token), and prompt-processing speed. Pass models[] to compare several models with the same prompt, ranked by generation speed."
+    },
+    {
+      "name": "search_available",
+      "description": "Search the built-in curated catalog of well-known local models (Ollama tags) by name, family, or task. Offline and instant. For live results with per-quant fit, use search_models with source 'huggingface'."
+    },
+    {
+      "name": "suggest_model",
+      "description": "Recommend catalog models for a task, ranked for THIS machine: fully-on-GPU first, then partial GPU offload, then CPU-only. Within a tier the largest (most capable) model comes first unless preferSpeed is true. Flags models already installed on a live provider and explains each pick."
+    },
+    {
+      "name": "search_models",
+      "description": "Find models to download, annotated with whether each fits this machine. source 'huggingface' searches GGUF repos on the Hugging Face Hub and returns per-quant sizes, the best quant for this hardware, and pullable references (Ollama: hf.co/<repo>:<quant>). source 'catalog' searches the offline curated list. The Ollama library has no public search API, so it is not a source."
+    },
+    {
+      "name": "complete",
+      "description": "DELEGATED INFERENCE: Offload a completion to a model you choose for cost savings and privacy. Without provider, runs on the live LOCAL provider that has the model (never a hosted API unless LOCAL_AI_ALLOW_HOSTED_FALLBACK is set); the result's 'provider', 'host' and 'local' fields say where it ran. Supports system prompts, JSON / JSON-Schema output (validated 'parsed' field), seed/topP/topK, image inputs for vision models, and contextLength for long inputs. Streams tokens via MCP progress notifications when the client sends a progressToken."
+    },
+    {
+      "name": "embed",
+      "description": "DELEGATED EMBEDDINGS: Generate embeddings for a string or an array of texts. Without provider, runs on the live local provider that has the model. Always returns one vector per input."
+    },
+    {
+      "name": "delegate",
+      "description": "ONE CALL to offload work locally: pick the best model for a task on THIS machine, make it ready, and run it. Prefers models already loaded (no load cost), then installed models that fit your free VRAM, then (with allowPull) the best catalog model that fits. Task specialists (coder, vision, reasoning) win over general models; larger fitting models win over smaller. Never uses a hosted provider unless allowHosted is true. Returns the completion plus a 'routing' block explaining the choice."
+    }
+  ]
 }

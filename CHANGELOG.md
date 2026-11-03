@@ -9,6 +9,16 @@ tags that version and publishes it.
 
 ### Fixed
 
+- Claude Desktop bundle settings now cover every runtime and option the server
+  reads: Docker Model Runner and Foundry Local URLs, vLLM / OpenAI-compatible /
+  Moonshot API keys (stored as sensitive), Moonshot URL, hosted fallback,
+  skipped runtimes, and extra provider instances. The bundle manifest also
+  lists its tools, generated from `mcp-tools.json` by `npm run gen:tools`.
+- The MCP Registry entry (`server.json`) now lists `VLLM_API_KEY` (secret),
+  `MOONSHOT_HOST`, `LOCAL_AI_DISABLE`, `LOCAL_AI_PROVIDERS`, and
+  `LOCAL_AI_DISABLE_NETWORK_SEARCH`. A test keeps both manifests in parity
+  with the env vars the server reads.
+
 - CI validates `mcpb/manifest.json` with `mcpb validate`, and `release.yml`
   will not tag a version until the manifest passes, so a broken Claude Desktop
   manifest can no longer fail `publish.yml` after the release already exists.

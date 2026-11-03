@@ -1,6 +1,7 @@
 // Regenerates mcp-tools.json from the registered tools (default config).
-// Run after `npm run build`: `npm run gen:tools`. CI fails if the file drifts.
-import { writeFileSync } from "node:fs";
+// Also writes the `tools` array of mcpb/manifest.json from the same list.
+// Run after `npm run build`: `npm run gen:tools`. CI fails if either file drifts.
+import { readFileSync, writeFileSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { loadConfig } from "../dist/config.js";
@@ -19,5 +20,12 @@ const manifest = tools.map((t) => ({
   annotations: t.annotations,
 }));
 writeFileSync(new URL("../mcp-tools.json", import.meta.url), `${JSON.stringify(manifest, null, 2)}\n`);
+
+// The Claude Desktop bundle lists the same tools (name + description).
+const mcpbUrl = new URL("../mcpb/manifest.json", import.meta.url);
+const mcpb = JSON.parse(readFileSync(mcpbUrl, "utf8"));
+mcpb.tools = manifest.map(({ name, description }) => ({ name, description }));
+writeFileSync(mcpbUrl, `${JSON.stringify(mcpb, null, 2)}\n`);
+
 await client.close();
-console.log(`mcp-tools.json: ${manifest.length} tools`);
+console.log(`mcp-tools.json and mcpb/manifest.json: ${manifest.length} tools`);
