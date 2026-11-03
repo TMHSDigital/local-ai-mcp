@@ -39,8 +39,17 @@ export interface ProbeDeps {
 /** Each probe subprocess gets this long before it is killed. */
 export const PROBE_TIMEOUT_MS = 5000;
 
+/**
+ * Runs probe commands from the OS temp dir, not the server's cwd. GPU tools
+ * can write files relative to the working directory (the NVIDIA driver
+ * creates `NVIDIA Corporation/umdlogs/` there on Windows), and the server's
+ * cwd is often the user's project.
+ */
+export const runProbeCommand: CommandRunner = (cmd, args, opts) =>
+  runCommand(cmd, args, { ...opts, cwd: os.tmpdir() });
+
 const defaultDeps: ProbeDeps = {
-  run: runCommand,
+  run: runProbeCommand,
   platform: os.platform(),
   totalmem: () => os.totalmem(),
   freemem: () => os.freemem(),

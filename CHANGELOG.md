@@ -18,6 +18,10 @@ tags that version and publishes it.
   `MOONSHOT_HOST`, `LOCAL_AI_DISABLE`, `LOCAL_AI_PROVIDERS`, and
   `LOCAL_AI_DISABLE_NETWORK_SEARCH`. A test keeps both manifests in parity
   with the env vars the server reads.
+- Hardware probes (`nvidia-smi`, PowerShell, `sysctl`, `lspci`, ...) run from
+  the OS temp directory, so GPU drivers can no longer drop log folders such
+  as `NVIDIA Corporation/umdlogs/` into the directory the server was started
+  from (often the user's project).
 
 ### Internal
 

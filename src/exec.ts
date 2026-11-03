@@ -12,6 +12,8 @@ export interface ExecOptions {
   signal?: AbortSignal;
   /** Called with each stdout/stderr chunk (e.g. to parse progress). */
   onOutput?: (chunk: string) => void;
+  /** Working directory for the child. Defaults to the server's cwd. */
+  cwd?: string;
 }
 
 /**
@@ -33,7 +35,11 @@ export function runCommand(cmd: string, args: string[], opts: ExecOptions = {}):
     };
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+      child = spawn(cmd, args, {
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+        ...(opts.cwd ? { cwd: opts.cwd } : {}),
+      });
     } catch (err) {
       resolve({ status: 127, stdout: "", stderr: err instanceof Error ? err.message : String(err) });
       return;

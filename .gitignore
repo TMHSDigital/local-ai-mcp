@@ -62,3 +62,6 @@ tmp/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# GPU driver logs written to the working directory (probes now run from the temp dir)
+NVIDIA Corporation/

@@ -1,5 +1,8 @@
+import { realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { runCommand } from "../exec.js";
+import { runProbeCommand } from "../hardware/index.js";
 
 const node = process.execPath;
 
@@ -7,6 +10,18 @@ describe("runCommand", () => {
   it("captures stdout and exit code", async () => {
     const r = await runCommand(node, ["-e", "process.stdout.write('hi'); process.exit(3)"]);
     expect(r).toMatchObject({ status: 3, stdout: "hi" });
+  });
+
+  it("runs the child in the requested cwd", async () => {
+    const r = await runCommand(node, ["-e", "process.stdout.write(process.cwd())"], { cwd: tmpdir() });
+    expect(realpathSync.native(r.stdout)).toBe(realpathSync.native(tmpdir()));
+  });
+
+  it("runs hardware probes from the temp dir, never the server's cwd", async () => {
+    // GPU drivers can write log folders into the cwd (NVIDIA umdlogs on Windows).
+    const r = await runProbeCommand(node, ["-e", "process.stdout.write(process.cwd())"], { timeoutMs: 5000 });
+    expect(realpathSync.native(r.stdout)).toBe(realpathSync.native(tmpdir()));
+    expect(realpathSync.native(r.stdout)).not.toBe(realpathSync.native(process.cwd()));
   });
 
   it("streams output chunks to onOutput", async () => {
