@@ -233,6 +233,10 @@ export function register(server: McpServer, ctx: ToolContext): void {
         model: z.string(),
         plan: z.array(z.string()),
         fit: anyRecord.optional(),
+        verified: z
+          .boolean()
+          .optional()
+          .describe("false when the runtime could not be asked whether the model is loaded after loading it"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
@@ -268,6 +272,7 @@ export async function ensureModel(
   fit?: FitOutcome;
   loadMs?: number;
   detail?: string;
+  verified?: boolean;
 }> {
   const { manager, config } = ctx;
   const opts: RequestOptions = reqOpts(config.requestTimeoutMs, extra);
@@ -342,10 +347,19 @@ export async function ensureModel(
   }
   const loadMs = Date.now() - start;
   ctx.onStateChange?.();
-  const verify = caps.load ? await p.listLoaded(opts).catch(() => [] as LoadedModelInfo[]) : [];
-  const ready = !caps.load || verify.length === 0 || verify.some((m) => sameModel(m.id, args.model));
+  // Verify the load. If the runtime cannot be asked, trust the successful
+  // load call but say it was not verified; if it answers without the model,
+  // the model is not ready.
+  let ready = true;
+  let verified: boolean | undefined;
+  if (caps.load) {
+    const verify = await p.listLoaded(opts).catch(() => undefined);
+    verified = verify !== undefined;
+    if (verify) ready = verify.some((m) => sameModel(m.id, args.model));
+  }
   return {
     ready,
+    ...(verified === false ? { verified } : {}),
     provider: p.name,
     model: args.model,
     plan,

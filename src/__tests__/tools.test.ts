@@ -239,6 +239,102 @@ describe("lifecycle", () => {
   });
 });
 
+describe("ensure_model", () => {
+  const gpu = (free: number) => resources({ ramFreeBytes: 64 * GB, gpus: [{ name: "gpu", vramFreeBytes: free * GB, source: "t" }] });
+  const ops = (p: FakeProvider, op: string) => p.calls.filter((c) => c.op === op).map((c) => c.model);
+
+  it("short-circuits when the model is already loaded", async () => {
+    const p = new FakeProvider("ollama", { models: ["m:7b"], loaded: ["m:7b"] });
+    const { client } = await connect([p]);
+    expect(await call(client, "ensure_model", { model: "m:7b" })).toMatchObject({
+      ready: true,
+      alreadyLoaded: true,
+      plan: ["already loaded"],
+    });
+    expect([...ops(p, "load"), ...ops(p, "unload")]).toEqual([]);
+  });
+
+  it('evict "all" unloads every other model, oldest expiry first', async () => {
+    const p = new FakeProvider("ollama", {
+      models: [{ id: "big:14b", sizeBytes: 9 * GB, parameterSize: "14B" }, "a:7b", "b:3b"],
+      loaded: [
+        { id: "a:7b", sizeVramBytes: 5 * GB, expiresAt: "2026-01-01T00:10:00Z" },
+        { id: "b:3b", sizeVramBytes: 3 * GB, expiresAt: "2026-01-01T00:01:00Z" },
+      ],
+    });
+    const { client } = await connect([p], { hw: gpu(6) });
+    const out = await call(client, "ensure_model", { model: "big:14b", evict: "all" });
+    expect(out.evicted).toEqual(["b:3b", "a:7b"]);
+    expect(ops(p, "unload")).toEqual(["b:3b", "a:7b"]);
+    expect(ops(p, "load")).toEqual(["big:14b"]);
+  });
+
+  it.each(["all", "lru"])('evict "%s" that still cannot fit throws without unloading', async (evict) => {
+    const p = new FakeProvider("ollama", {
+      models: [{ id: "huge:70b", sizeBytes: 40 * GB, parameterSize: "70B" }, "a:7b"],
+      loaded: [{ id: "a:7b", sizeVramBytes: 1 * GB }],
+    });
+    const { client } = await connect([p], { hw: resources({ ramFreeBytes: 8 * GB, gpus: [{ name: "gpu", vramFreeBytes: 4 * GB, source: "t" }] }) });
+    await expect(call(client, "ensure_model", { model: "huge:70b", evict })).rejects.toThrow(/does not fit/);
+    expect(ops(p, "unload")).toEqual([]);
+  });
+
+  it("without evict, loads a model that only fits partly or on CPU and says so", async () => {
+    const p = new FakeProvider("ollama", { models: [{ id: "big:14b", sizeBytes: 9 * GB, parameterSize: "14B" }], loaded: [] });
+    const { client } = await connect([p], { hw: gpu(2) });
+    const out = await call(client, "ensure_model", { model: "big:14b" });
+    expect(out.plan.some((s: string) => s.startsWith("note:"))).toBe(true);
+    expect(ops(p, "unload")).toEqual([]);
+    expect(ops(p, "load")).toEqual(["big:14b"]);
+  });
+
+  it("does nothing to load on runtimes that load on first request", async () => {
+    const p = new FakeProvider("dmr", { type: "dockermodelrunner", models: ["ai/smollm2"], caps: { load: false, unload: false } });
+    const { client } = await connect([p]);
+    const out = await call(client, "ensure_model", { model: "ai/smollm2" });
+    expect(out.ready).toBe(true);
+    expect(out.plan).toContain("dmr loads models on first request; nothing to load");
+    expect(ops(p, "load")).toEqual([]);
+  });
+
+  it("is not ready when the runtime reports the model missing after load", async () => {
+    const p = new FakeProvider("ollama", { models: ["m:7b"] });
+    p.load = async (model) => ({ provider: p.name, model, loaded: true });
+    const { client } = await connect([p]);
+    expect((await call(client, "ensure_model", { model: "m:7b" })).ready).toBe(false);
+  });
+
+  it("marks the result unverified when the loaded list cannot be read after load", async () => {
+    const p = new FakeProvider("ollama", { models: ["m:7b"] });
+    let loadedCalls = 0;
+    p.listLoaded = async () => {
+      loadedCalls += 1;
+      if (loadedCalls > 1) throw new Error("ps failed");
+      return [];
+    };
+    const { client } = await connect([p]);
+    expect(await call(client, "ensure_model", { model: "m:7b" })).toMatchObject({ ready: true, verified: false });
+  });
+
+  it("stops before loading when an unload fails mid-eviction", async () => {
+    const p = new FakeProvider("ollama", {
+      models: [{ id: "big:14b", sizeBytes: 9 * GB, parameterSize: "14B" }, "a:7b", "b:3b"],
+      loaded: [
+        { id: "a:7b", sizeVramBytes: 5 * GB, expiresAt: "2026-01-01T00:10:00Z" },
+        { id: "b:3b", sizeVramBytes: 3 * GB, expiresAt: "2026-01-01T00:01:00Z" },
+      ],
+    });
+    const realUnload = p.unload.bind(p);
+    p.unload = async (model) => {
+      if (model === "a:7b") throw new Error("unload failed");
+      return realUnload(model);
+    };
+    const { client } = await connect([p], { hw: gpu(6) });
+    await expect(call(client, "ensure_model", { model: "big:14b", evict: "all" })).rejects.toThrow(/unload failed/);
+    expect(ops(p, "load")).toEqual([]);
+  });
+});
+
 describe("delegate", () => {
   it("prefers a loaded task specialist and explains the choice", async () => {
     const p = new FakeProvider("ollama", {
