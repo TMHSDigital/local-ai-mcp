@@ -7,6 +7,8 @@ tags that version and publishes it.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-03
+
 ### Fixed
 
 - `delegate` ranks by size tier before speed. Models within ~20% parameter
