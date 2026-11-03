@@ -379,9 +379,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
       const opts = reqOpts(config.requestTimeoutMs, extra);
       const tag = TASK_TAG[task];
       const hostedOk = allowHosted ?? config.allowHostedFallback;
-      let pool = (await manager.detected(detectOpts)).filter(
-        (p) => p.capabilities().complete && (p.kind === "local" || hostedOk),
-      );
+      let pool = await manager.pool(detectOpts, { capability: "complete", hosted: hostedOk });
       if (provider) {
         const named = manager.require(provider);
         pool = pool.filter((p) => p.name === named.name);

@@ -97,9 +97,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
       if (provider) {
         targets = [manager.require(provider)];
       } else {
-        const live = (await manager.detected(detectOpts)).filter(
-          (p) => p.kind === "local" || config.allowHostedFallback,
-        );
+        const live = await manager.pool(detectOpts);
         targets = await manager.locate(model, live, opts);
         if (targets.length === 0) {
           throw new Error(

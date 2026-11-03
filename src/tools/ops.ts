@@ -218,7 +218,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
       let p: Provider | undefined;
       if (provider) p = manager.require(provider);
       else {
-        const live = (await manager.detected(detectOpts)).filter((x) => x.kind === "local");
+        const live = await manager.pool(detectOpts, { hosted: false });
         p = (await manager.locate(model, live, opts))[0];
       }
       const sizing = await sizeModel(ctx, p, model, opts, { sizeBytes, parameterSize });

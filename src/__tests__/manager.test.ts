@@ -126,3 +126,43 @@ describe("ProviderManager.select", () => {
     expect(() => m.require("nope")).toThrow(/Unknown provider: nope. Configured providers: ollama-gpu2/);
   });
 });
+
+describe("ProviderManager.pool (the single local-first gate)", () => {
+  const setup = (allowHostedFallback: boolean) => {
+    const local = new FakeProvider("ollama");
+    const hosted = new FakeProvider("cloud", { type: "moonshot", kind: "hosted" });
+    const noEmbed = new FakeProvider("chatonly", { caps: { embed: false } });
+    const down = new FakeProvider("down");
+    down.live = false;
+    return mgr([local, hosted, noEmbed, down], { allowHostedFallback });
+  };
+  const names = (ps: { name: string }[]) => ps.map((p) => p.name);
+
+  it("excludes hosted providers unless the fallback flag is set", async () => {
+    expect(names(await setup(false).pool(OPTS))).toEqual(["ollama", "chatonly"]);
+    expect(names(await setup(true).pool(OPTS))).toEqual(["ollama", "cloud", "chatonly"]);
+  });
+
+  it("lets an explicit hosted option override the flag either way", async () => {
+    expect(names(await setup(true).pool(OPTS, { hosted: false }))).toEqual(["ollama", "chatonly"]);
+    expect(names(await setup(false).pool(OPTS, { hosted: true }))).toEqual(["ollama", "cloud", "chatonly"]);
+  });
+
+  it("filters by capability and drops providers that are not live", async () => {
+    expect(names(await setup(false).pool(OPTS, { capability: "embed" }))).toEqual(["ollama"]);
+  });
+});
+
+describe("tools route through ProviderManager.pool", () => {
+  it("no tool filters providers by kind after detected()", async () => {
+    const { readFileSync, readdirSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const dir = join(__dirname, "..", "tools");
+    for (const f of readdirSync(dir).filter((n) => n.endsWith(".ts"))) {
+      const src = readFileSync(join(dir, f), "utf8");
+      expect(src, `${f} should use manager.pool() instead of detected().filter(kind)`).not.toMatch(
+        /detected\([^;]*?\.filter\([\s\S]{0,80}?\.kindb/,
+      );
+    }
+  });
+});

@@ -84,9 +84,7 @@ export function rankSuggestions(
 /** model id -> provider names, across live local providers. */
 export async function installedModels(ctx: ToolContext, extra?: Extra): Promise<Map<string, string[]>> {
   const out = new Map<string, string[]>();
-  const live = (await ctx.manager.detected(reqOpts(ctx.config.detectTimeoutMs, extra))).filter(
-    (p) => p.kind === "local",
-  );
+  const live = await ctx.manager.pool(reqOpts(ctx.config.detectTimeoutMs, extra), { hosted: false });
   const opts = reqOpts(ctx.config.requestTimeoutMs, extra);
   await Promise.all(
     live.map(async (p) => {

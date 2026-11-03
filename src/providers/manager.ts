@@ -48,6 +48,16 @@ interface CacheEntry<T> {
   at: number;
 }
 
+export interface PoolOptions {
+  /** Only providers with this capability. */
+  capability?: Capability;
+  /**
+   * Whether hosted providers may be included. Undefined follows
+   * LOCAL_AI_ALLOW_HOSTED_FALLBACK; false always excludes them.
+   */
+  hosted?: boolean;
+}
+
 export interface SelectOptions {
   /** Capability the chosen provider must have. */
   capability: Capability;
@@ -130,6 +140,18 @@ export class ProviderManager {
     return this.providers.filter((_, i) => live[i]);
   }
 
+  /**
+   * Live providers eligible for implicit routing: local ones, plus hosted ones
+   * only when allowed (see PoolOptions.hosted). This is the one place the
+   * local-first rule is applied; tools must not filter on `kind` themselves.
+   */
+  async pool(opts: RequestOptions, o: PoolOptions = {}): Promise<Provider[]> {
+    const hosted = o.hosted ?? this.config.allowHostedFallback;
+    return (await this.detected(opts)).filter(
+      (p) => (p.kind === "local" || hosted) && (!o.capability || p.capabilities()[o.capability]),
+    );
+  }
+
   /** Explicit provider -> [it]; otherwise every live provider. Used by read-only tools. */
   async resolve(providerArg: string | undefined, opts: RequestOptions): Promise<Provider[]> {
     if (providerArg) return [this.require(providerArg)];
@@ -177,10 +199,12 @@ export class ProviderManager {
       }
       return p;
     }
-    const live = (await this.detected(opts)).filter((p) => p.capabilities()[sel.capability]);
-    const local = live.filter((p) => p.kind === "local");
-    const hosted = live.filter((p) => p.kind === "hosted");
-    const pool = this.config.allowHostedFallback ? [...local, ...hosted] : local;
+    const pool = await this.pool(opts, { capability: sel.capability });
+    // pool() keeps configuration order; local providers go first.
+    pool.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "local" ? -1 : 1));
+    const hosted = (await this.detected(opts)).filter(
+      (p) => p.kind === "hosted" && p.capabilities()[sel.capability],
+    );
     const hostedHint =
       hosted.length > 0 && !this.config.allowHostedFallback
         ? ` Hosted provider(s) ${hosted.map((p) => p.name).join(", ")} are configured but never used implicitly; pass provider explicitly (or set LOCAL_AI_ALLOW_HOSTED_FALLBACK=1).`
