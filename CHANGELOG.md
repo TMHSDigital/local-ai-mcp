@@ -7,6 +7,13 @@ tags that version and publishes it.
 
 ## [Unreleased]
 
+### Fixed
+
+- `publish.yml` waits for a new npm version to become readable before
+  registering it in the MCP Registry, and decides whether to register from
+  the Registry's own state, so a re-dispatch can finish a listing that failed
+  after the npm publish succeeded.
+
 ## [0.6.0] - 2026-11-03
 
 ### Added

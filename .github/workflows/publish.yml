@@ -72,10 +72,27 @@ jobs:
       # Lists this version in the official MCP Registry. Authenticates with the
       # workflow's GitHub OIDC token (io.github.TMHSDigital/* namespace); the
       # registry checks package.json "mcpName" against server.json "name".
+      # Gated on the MCP Registry's own state, not on the npm step, so a
+      # re-dispatch can finish a listing that failed after npm succeeded.
       - name: Publish to the MCP Registry
-        if: steps.pub.outputs.skip == 'false'
         run: |
           set -euo pipefail
+          name=$(node -p "require('./server.json').name")
+          pkg=$(node -p "require('./package.json').name")
+          enc=$(node -p "encodeURIComponent(require('./server.json').name)")
+          code=$(curl -s -o /dev/null -w '%{http_code}' "https://registry.modelcontextprotocol.io/v0/servers/${enc}/versions/${VERSION}")
+          if [ "$code" = "200" ]; then
+            echo "${name}@${VERSION} is already in the MCP Registry; skipping."
+            exit 0
+          fi
+          # The registry validates the npm package, and a fresh npm publish
+          # can take a few minutes to become readable. Wait for it.
+          for i in $(seq 1 30); do
+            if npm view "${pkg}@${VERSION}" version >/dev/null 2>&1; then break; fi
+            if [ "$i" = "30" ]; then echo "::error::${pkg}@${VERSION} is not on npm after 10 minutes"; exit 1; fi
+            echo "Waiting for ${pkg}@${VERSION} on npm ($i/30)..."
+            sleep 20
+          done
           curl -sfL "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.7/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
           ./mcp-publisher login github-oidc
           ./mcp-publisher publish
