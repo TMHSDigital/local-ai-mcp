@@ -101,6 +101,70 @@ describe("DockerModelRunnerProvider", () => {
     await new DockerModelRunnerProvider("http://localhost:12434").complete({ model: "ai/smollm2", prompt: "x" }, OPTS);
     expect(calls[0].url).toBe("http://localhost:12434/engines/v1/chat/completions");
   });
+
+  it("rejects a pull when the stream reports a typed error event mid-pull", async () => {
+    mockFetch(() => ({
+      chunks: ['{"type":"progress","pulled":1,"total":10}\n', '{"type":"error","message":"manifest unknown"}\n'],
+    }));
+    const progress: unknown[] = [];
+    await expect(
+      new DockerModelRunnerProvider("http://localhost:12434").pull("ai/missing", {
+        ...OPTS,
+        onProgress: (x) => void progress.push(x),
+      }),
+    ).rejects.toThrow(/manifest unknown/);
+    expect(progress).toEqual([{ status: "progress", completed: 1, total: 10 }]);
+  });
+
+  it("rejects a pull on an untyped error line", async () => {
+    mockFetch(() => ({ chunks: ['{"error":"x"}\n'] }));
+    await expect(new DockerModelRunnerProvider("http://localhost:12434").pull("ai/m", OPTS)).rejects.toThrow(/^x$/);
+  });
+
+  it("reports plain-text pull lines as progress status", async () => {
+    mockFetch(() => ({ chunks: ["pulling layer abc\n"] }));
+    const progress: unknown[] = [];
+    const res = await new DockerModelRunnerProvider("http://localhost:12434").pull("ai/m", {
+      ...OPTS,
+      onProgress: (x) => void progress.push(x),
+    });
+    expect(progress).toEqual([{ status: "pulling layer abc" }]);
+    expect(res.status).toBe("pulling layer abc");
+  });
+
+  it("falls back to /engines/v1/models when native /models fails", async () => {
+    const calls = mockFetch((url) =>
+      url.endsWith("/engines/v1/models")
+        ? { body: { data: [{ id: "ai/smollm2" }, { id: "ai/qwen3" }] } }
+        : { status: 404, text: "not found" },
+    );
+    const models = await new DockerModelRunnerProvider("http://localhost:12434").listModels(OPTS);
+    expect(calls.map((c) => c.url)).toEqual([
+      "http://localhost:12434/models",
+      "http://localhost:12434/engines/v1/models",
+    ]);
+    expect(models.map((m) => m.id)).toEqual(["ai/smollm2", "ai/qwen3"]);
+  });
+
+  it("maps the object form { models: [...] } like the array form", async () => {
+    const entry = { id: "sha256:abc", tags: ["ai/smollm2"], config: { architecture: "llama", size: "1 GiB" } };
+    mockFetch(() => ({ body: [entry] }));
+    const fromArray = await new DockerModelRunnerProvider("http://localhost:12434").listModels(OPTS);
+    mockFetch(() => ({ body: { models: [entry] } }));
+    const fromObject = await new DockerModelRunnerProvider("http://localhost:12434").listModels(OPTS);
+    expect(fromObject).toEqual(fromArray);
+    expect(fromObject).toEqual([{ id: "ai/smollm2", provider: "dockermodelrunner", family: "llama", sizeBytes: 1024 ** 3 }]);
+  });
+
+  it("skips entries with neither tags nor id, and omits sizeBytes for unparseable sizes", async () => {
+    mockFetch(() => ({
+      body: [{ tags: [], config: { size: "1 GiB" } }, { id: "ai/x", config: { size: "unknown" } }],
+    }));
+    const models = await new DockerModelRunnerProvider("http://localhost:12434").listModels(OPTS);
+    expect(models).toHaveLength(1);
+    expect(models[0].id).toBe("ai/x");
+    expect(models[0]).not.toHaveProperty("sizeBytes");
+  });
 });
 
 describe("FoundryLocalProvider", () => {
