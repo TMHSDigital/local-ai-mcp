@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeFit, estimateKvCacheBytes, parseParameterBillions } from "../fit.js";
+import { computeFit, estimateKvCacheBytes, HEADROOM, parseParameterBillions } from "../fit.js";
 import { GB, resources } from "./support.js";
 
 const KiB = 1024;
@@ -16,6 +16,10 @@ describe("parseParameterBillions", () => {
     ["137M", 0.137],
     ["huge", undefined],
     [undefined, undefined],
+    ["0B", undefined],
+    ["-3B", undefined],
+    ["1.2.3B", undefined],
+    ["8b ", 8],
   ])("%s", (s, v) => expect(parseParameterBillions(s)).toBe(v));
 });
 
@@ -116,6 +120,67 @@ describe("computeFit", () => {
     const r = resources({ gpus: [{ name: "a", vramFreeBytes: 1 * GB, source: "t" }] });
     expect(computeFit(r, 5 * GB, { parameterSize: "8B" }).target).not.toBe("gpu");
     expect(computeFit(r, 5 * GB, { parameterSize: "8B", residentVramBytes: 6 * GB }).target).toBe("gpu");
+  });
+
+  it("is a GPU fit at exactly the headroom budget and partial one byte over", () => {
+    const required = computeFit(resources(), 5 * GB, { architecture: LLAMA31_8B }).requiredBytes;
+    const need = required * HEADROOM;
+    const at = (free: number) =>
+      computeFit(resources({ gpus: [{ name: "a", vramFreeBytes: free, source: "t" }] }), 5 * GB, {
+        architecture: LLAMA31_8B,
+      });
+    expect(at(need)).toMatchObject({ target: "gpu", gpuAvailableBytes: need });
+    expect(at(need + 1).target).toBe("gpu");
+    expect(at(need - 1).target).toBe("partial");
+  });
+
+  it("rejects offload below 10% of the model and falls back to CPU", () => {
+    const r = resources({ ramTotalBytes: 64 * GB, ramFreeBytes: 64 * GB, gpus: [{ name: "a", vramFreeBytes: 0.5 * GB, source: "t" }] });
+    const out = computeFit(r, 20 * GB, { parameterSize: "32B" });
+    expect(0.5 * GB / (out.requiredBytes * HEADROOM)).toBeLessThan(0.1);
+    expect(out).toMatchObject({ fits: true, target: "cpu", gpuCount: 1 });
+    expect(out).not.toHaveProperty("gpuFraction");
+    expect(out.note).toMatch(/Too large for useful GPU offload/);
+  });
+
+  it("flags estimated free VRAM in the note", () => {
+    const gpu = { name: "a", vramFreeBytes: 22 * GB, source: "t" };
+    const exact = computeFit(resources({ gpus: [gpu] }), 5 * GB, { parameterSize: "8B" });
+    const est = computeFit(resources({ gpus: [{ ...gpu, freeEstimated: true }] }), 5 * GB, { parameterSize: "8B" });
+    expect(exact.note).not.toMatch(/estimated/);
+    expect(est.note).toMatch(/\(free VRAM estimated from total\)/);
+  });
+
+  it("handles a zero-byte weight without a parameter size", () => {
+    const out = computeFit(resources(), 0);
+    expect(out).toMatchObject({ requiredBytes: 0, kvCacheBytes: 0, kvEstimate: "weight-ratio", fits: true });
+    expect(Object.values(out).some((v) => typeof v === "number" && Number.isNaN(v))).toBe(false);
+  });
+
+  it("excludes GPUs with zero or unknown free VRAM from gpuCount", () => {
+    const out = computeFit(
+      resources({
+        gpus: [
+          { name: "a", vramFreeBytes: 12 * GB, source: "t" },
+          { name: "b", vramFreeBytes: 0, source: "t" },
+          { name: "c", vramTotalBytes: 12 * GB, source: "t" },
+        ],
+      }),
+      2 * GB,
+      { parameterSize: "3B" },
+    );
+    expect(out).toMatchObject({ target: "gpu", gpuCount: 1, gpuAvailableBytes: 12 * GB });
+    expect(out.note).not.toMatch(/split across/);
+  });
+
+  it("unified memory: does not fit when the need exceeds RAM", () => {
+    const mac = resources({
+      platform: "darwin",
+      ramFreeBytes: 10 * GB,
+      gpus: [{ name: "Apple M3", vramFreeBytes: 8 * GB, unified: true, source: "sysctl" }],
+    });
+    const out = computeFit(mac, 12 * GB, { parameterSize: "20B" });
+    expect(out).toMatchObject({ fits: false, target: "none", unifiedMemory: true, availableBytes: 10 * GB });
   });
 
   it("falls back to CPU, then none", () => {
