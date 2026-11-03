@@ -44,7 +44,7 @@
 
 - [ ] Learn per-machine speed: cache `benchmark` results and use them in `delegate` ranking
 - [ ] Quality-aware routing (task-specific evals on small fixtures) beyond size as a proxy
-- [ ] Background pull jobs (`pull_status`) for clients that don't render progress
+- [x] Background pull jobs (`pull_status`) for clients that don't render progress
 - [ ] Second hosted provider, capability-honest (complete-only is acceptable)
 - [ ] More adapters by request: LocalAI, KoboldCpp, Lemonade, llamafile
 

@@ -209,7 +209,15 @@
     },
     {
       "name": "pull_model",
-      "description": "HEAVY: Download a model onto ONE provider (multiple GB, can take a long time). Streams download progress via MCP progress notifications when the client sends a progressToken. Without provider, uses the provider that already has the model, else the first live local provider that can pull."
+      "description": "HEAVY: Download a model onto ONE provider (multiple GB, can take a long time). Streams download progress via MCP progress notifications when the client sends a progressToken. With background:true, returns a jobId immediately instead; poll pull_status and stop it with pull_cancel (use this when the client has no progress display or a short tool timeout). Without provider, uses the provider that already has the model, else the first live local provider that can pull."
+    },
+    {
+      "name": "pull_status",
+      "description": "Status of background pulls started with pull_model { background: true }: state (running, done, failed, cancelled), progress, and result or error. Without jobId, lists every job this server remembers (finished jobs are kept for an hour; jobs are forgotten on restart)."
+    },
+    {
+      "name": "pull_cancel",
+      "description": "Stop a background pull started with pull_model { background: true }. Finished jobs are returned unchanged."
     },
     {
       "name": "remove_model",

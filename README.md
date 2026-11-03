@@ -99,7 +99,8 @@ Every tool declares MCP annotations (read-only, destructive, open-world) and an 
 | | `list_models` | Installed models on each live provider |
 | | `list_loaded` | Models resident in memory, with VRAM use and context length |
 | | `model_info` | Family, size, quantization, context length and layer architecture |
-| Lifecycle | `pull_model` | **Heavy.** Downloads to one provider, streaming progress notifications |
+| Lifecycle | `pull_model` | **Heavy.** Downloads to one provider, streaming progress notifications. `background: true` returns a job id instead |
+| | `pull_status` / `pull_cancel` | Check or stop background pulls |
 | | `remove_model` | **Destructive.** `provider` is required; asks you directly through MCP elicitation when the client supports it, otherwise needs `confirm: true` |
 | | `load_model` / `unload_model` | One provider, with optional `keepAlive` and `contextLength` |
 | | `ensure_model` | Pull (if allowed), fit check, evict others (`lru` / `all`), load and verify. `dryRun` returns the plan only |

@@ -8,6 +8,7 @@ import { ProviderManager } from "./providers/manager.js";
 import type { Provider } from "./providers/types.js";
 import { SpeedCache } from "./speed-cache.js";
 import type { ToolContext } from "./tools/context.js";
+import { PullJobs } from "./tools/jobs.js";
 import { registerAll } from "./tools/index.js";
 
 // Read the version from package.json so the server reports the published
@@ -38,6 +39,7 @@ export function createServer(
     hardware: deps.hardware ?? createHardwareProbe(),
     config,
     speeds: deps.speeds ?? new SpeedCache(config.benchmarkCachePath),
+    pullJobs: new PullJobs(),
   };
   const server = new McpServer(
     { name: "local-ai-mcp", version: readVersion() },

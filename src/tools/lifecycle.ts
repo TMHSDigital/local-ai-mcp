@@ -106,19 +106,36 @@ export function register(server: McpServer, ctx: ToolContext): void {
     {
       title: "Pull model",
       description:
-        "HEAVY: Download a model onto ONE provider (multiple GB, can take a long time). Streams download progress via MCP progress notifications when the client sends a progressToken. Without provider, uses the provider that already has the model, else the first live local provider that can pull.",
+        "HEAVY: Download a model onto ONE provider (multiple GB, can take a long time). Streams download progress via MCP progress notifications when the client sends a progressToken. With background:true, returns a jobId immediately instead; poll pull_status and stop it with pull_cancel (use this when the client has no progress display or a short tool timeout). Without provider, uses the provider that already has the model, else the first live local provider that can pull.",
       inputSchema: {
         model: z.string().describe("Model id/name to pull (e.g. qwen3:8b, hf.co/<repo>:<quant>)"),
         provider: providerArg(ctx).optional(),
+        background: z
+          .boolean()
+          .optional()
+          .describe("Return a jobId at once and download in the background (default false). A second call for the same model joins the running job."),
       },
-      outputSchema: { pull: anyRecord },
+      outputSchema: { pull: anyRecord.optional(), job: anyRecord.optional() },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    safe(async ({ model, provider }, extra) => {
+    safe(async ({ model, provider, background }, extra) => {
       const p = await manager.select(provider, model, reqOpts(config.detectTimeoutMs, extra), {
         capability: "pull",
         allowMissing: true,
       });
+      if (background) {
+        // Not tied to this request's signal: the request returns right away.
+        const job = ctx.pullJobs.start(
+          p,
+          model,
+          (signal, onProgress) => p.pull(model, { timeoutMs: config.pullTimeoutMs, signal, onProgress }),
+          () => {
+            manager.invalidate(p.name);
+            changed();
+          },
+        );
+        return ok({ job });
+      }
       const result = await p.pull(model, {
         ...reqOpts(config.pullTimeoutMs, extra),
         onProgress: pullProgress(extra),
@@ -126,6 +143,40 @@ export function register(server: McpServer, ctx: ToolContext): void {
       manager.invalidate(p.name);
       changed();
       return ok({ pull: result });
+    }),
+  );
+
+  server.registerTool(
+    "pull_status",
+    {
+      title: "Pull status",
+      description:
+        "Status of background pulls started with pull_model { background: true }: state (running, done, failed, cancelled), progress, and result or error. Without jobId, lists every job this server remembers (finished jobs are kept for an hour; jobs are forgotten on restart).",
+      inputSchema: { jobId: z.string().optional().describe("Job id returned by pull_model") },
+      outputSchema: { jobs: z.array(anyRecord) },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    safe(async ({ jobId }) => {
+      if (!jobId) return ok({ jobs: ctx.pullJobs.list() });
+      const job = ctx.pullJobs.get(jobId);
+      if (!job) throw new Error(`Unknown pull job "${jobId}". It may have expired or the server restarted.`);
+      return ok({ jobs: [job] });
+    }),
+  );
+
+  server.registerTool(
+    "pull_cancel",
+    {
+      title: "Cancel pull",
+      description: "Stop a background pull started with pull_model { background: true }. Finished jobs are returned unchanged.",
+      inputSchema: { jobId: z.string().describe("Job id returned by pull_model") },
+      outputSchema: { job: anyRecord },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    safe(async ({ jobId }) => {
+      const job = ctx.pullJobs.cancel(jobId);
+      if (!job) throw new Error(`Unknown pull job "${jobId}". It may have expired or the server restarted.`);
+      return ok({ job });
     }),
   );
 

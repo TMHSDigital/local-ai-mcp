@@ -47,6 +47,8 @@ const TOOL_NAMES = [
   "list_loaded",
   "model_info",
   "pull_model",
+  "pull_status",
+  "pull_cancel",
   "remove_model",
   "load_model",
   "unload_model",
