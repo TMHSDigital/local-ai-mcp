@@ -7,7 +7,7 @@
   "assist": { "enabled": false },
   "linter": {
     "enabled": true,
-    "rules": { "recommended": true }
+    "rules": { "preset": "recommended" }
   },
   "overrides": [
     {

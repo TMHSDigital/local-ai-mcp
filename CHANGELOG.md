@@ -26,6 +26,8 @@ tags that version and publishes it.
   `benchmark`, and the `local-ai://` resources, subscriptions, and prompts.
   `discovery.ts`, `ops.ts`, and `resources.ts` reach 100% line coverage; the
   coverage thresholds rise to 85/75/85/88.
+- Biome config uses `"preset": "recommended"` instead of the deprecated
+  `"recommended": true` (same rule set).
 
 - CI validates `mcpb/manifest.json` with `mcpb validate`, and `release.yml`
   will not tag a version until the manifest passes, so a broken Claude Desktop
