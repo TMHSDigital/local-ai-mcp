@@ -45,6 +45,21 @@ describe("LMStudioProvider", () => {
     expect(noCli.capabilities()).toMatchObject({ pull: false, load: false });
   });
 
+  it("warms lifecycle capabilities on demand and does not cache a CLI timeout", async () => {
+    mockFetch(() => ({ body: { data: [] } }));
+    const p = new LMStudioProvider(HOST, { cliRunner: cli(true) });
+    await p.warmCapabilities();
+    expect(p.capabilities()).toMatchObject({ load: true, unload: true, remove: true });
+
+    let status = 124;
+    const flaky = new LMStudioProvider(HOST, {
+      cliRunner: async () => ({ status, stdout: "", stderr: "" }),
+    });
+    expect(await flaky.lmsAvailable()).toBe(false);
+    status = 0;
+    expect(await flaky.lmsAvailable()).toBe(true);
+  });
+
   it("pulls non-interactively and parses percentage progress", async () => {
     const record: string[][] = [];
     const progress: unknown[] = [];

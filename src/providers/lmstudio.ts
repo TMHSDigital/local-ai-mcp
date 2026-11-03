@@ -60,16 +60,26 @@ export class LMStudioProvider extends OpenAICompatibleProvider {
     return `${this.host}/v1`;
   }
 
-  /** Whether the `lms` CLI is on PATH. Cached after the first check. */
+  /**
+   * Whether the `lms` CLI is on PATH. Cached after the first definite answer;
+   * a timeout (exit 124, e.g. while `lms` bootstraps) is not cached, so the
+   * next call checks again.
+   */
   async lmsAvailable(): Promise<boolean> {
     if (this.lmsAvailableCache === undefined) {
       try {
-        this.lmsAvailableCache = (await this.cliRunner(["version"], { timeoutMs: 5000 })).status === 0;
+        const r = await this.cliRunner(["version"], { timeoutMs: 5000 });
+        if (r.status === 124) return false;
+        this.lmsAvailableCache = r.status === 0;
       } catch {
         this.lmsAvailableCache = false;
       }
     }
     return this.lmsAvailableCache;
+  }
+
+  async warmCapabilities(): Promise<void> {
+    await this.lmsAvailable();
   }
 
   /** Lifecycle capabilities reflect the cached CLI check (warmed by detect()). */

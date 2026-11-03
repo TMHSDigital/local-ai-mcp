@@ -222,6 +222,12 @@ export interface Provider {
   readonly kind: ProviderKind;
   readonly host: string;
   capabilities(): ProviderCapabilities;
+  /**
+   * Resolve anything `capabilities()` depends on that needs async work (e.g.
+   * checking for a CLI). Optional; called before trusting capabilities on a
+   * provider the caller named explicitly, which may never have been detected.
+   */
+  warmCapabilities?(): Promise<void>;
   detect(opts: RequestOptions): Promise<boolean>;
   health(opts: RequestOptions): Promise<HealthStatus>;
   listModels(opts: RequestOptions): Promise<ModelSummary[]>;

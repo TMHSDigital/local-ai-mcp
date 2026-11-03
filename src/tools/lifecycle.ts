@@ -147,7 +147,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     },
     safe(async ({ model, confirm, provider }, extra) => {
-      const p = manager.require(provider);
+      const p = await manager.requireReady(provider);
       if (!p.capabilities().remove) {
         throw new Error(`${p.name} does not support remove`);
       }

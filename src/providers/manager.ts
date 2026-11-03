@@ -93,6 +93,13 @@ export class ProviderManager {
     return p;
   }
 
+  /** `require`, plus async capability warm-up, for explicitly named providers. */
+  async requireReady(nameOrType: string): Promise<Provider> {
+    const p = this.require(nameOrType);
+    await p.warmCapabilities?.().catch(() => undefined);
+    return p;
+  }
+
   /** Drop cached detection/model lists (all, or one provider's). */
   invalidate(name?: string): void {
     if (name === undefined) {
@@ -164,7 +171,7 @@ export class ProviderManager {
     sel: SelectOptions,
   ): Promise<Provider> {
     if (providerArg) {
-      const p = this.require(providerArg);
+      const p = await this.requireReady(providerArg);
       if (!p.capabilities()[sel.capability]) {
         throw new UnsupportedOperationError(p.name, sel.capability);
       }
