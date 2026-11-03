@@ -302,6 +302,45 @@ describe("createHardwareProbe", () => {
     expect(ran).toBe(false);
   });
 
+  it("reuses GPU probes within the TTL, shares in-flight probes, and re-probes after invalidate", async () => {
+    let spawns = 0;
+    let now = 0;
+    const probe = createHardwareProbe({
+      platform: "linux",
+      now: () => now,
+      cacheTtlMs: 5000,
+      run: async () => {
+        spawns += 1;
+        return { status: 127, stdout: "", stderr: "" };
+      },
+    });
+    await Promise.all([probe.getSystemResources(), probe.getSystemResources()]);
+    const first = spawns;
+    expect(first).toBeGreaterThan(0);
+    now = 4000;
+    await probe.getSystemResources();
+    expect(spawns).toBe(first);
+    now = 6000;
+    await probe.getSystemResources();
+    expect(spawns).toBe(first * 2);
+    probe.invalidate?.();
+    await probe.getSystemResources();
+    expect(spawns).toBe(first * 3);
+  });
+
+  it("runs the Windows NVIDIA and PowerShell probes concurrently", async () => {
+    let running = 0;
+    let peak = 0;
+    await probeWindows(async () => {
+      running += 1;
+      peak = Math.max(peak, running);
+      await new Promise((r) => setTimeout(r, 5));
+      running -= 1;
+      return { status: 1, stdout: "", stderr: "" };
+    });
+    expect(peak).toBe(2);
+  });
+
   it("never throws when probes fail", async () => {
     const probe = createHardwareProbe({ platform: "linux", run: async () => ({ status: 127, stdout: "", stderr: "" }) });
     const r = await probe.getSystemResources();

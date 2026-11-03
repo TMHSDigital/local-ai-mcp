@@ -24,6 +24,8 @@ export interface SystemResources {
 
 export interface HardwareProbe {
   getSystemResources(): Promise<SystemResources>;
+  /** Drop cached GPU numbers, e.g. after a model load or unload changed free VRAM. */
+  invalidate?(): void;
 }
 
 export type CommandRunner = (cmd: string, args: string[], opts: ExecOptions) => Promise<ExecResult>;
@@ -34,7 +36,17 @@ export interface ProbeDeps {
   totalmem: () => number;
   freemem: () => number;
   cpuCount: () => number;
+  /** How long GPU probe results are reused. 0 re-probes every call. */
+  cacheTtlMs: number;
+  now: () => number;
 }
+
+/**
+ * GPU probes spawn processes (nvidia-smi, PowerShell, system_profiler) that
+ * cost hundreds of ms each, and most tools need them. Results are reused for
+ * this long; RAM is always read fresh because it is cheap.
+ */
+export const GPU_CACHE_TTL_MS = 5000;
 
 /** Each probe subprocess gets this long before it is killed. */
 export const PROBE_TIMEOUT_MS = 5000;
@@ -54,6 +66,8 @@ const defaultDeps: ProbeDeps = {
   totalmem: () => os.totalmem(),
   freemem: () => os.freemem(),
   cpuCount: () => os.cpus().length,
+  cacheTtlMs: GPU_CACHE_TTL_MS,
+  now: () => Date.now(),
 };
 
 /**
@@ -66,35 +80,56 @@ export function withEstimatedFree(gpu: GpuInfo): GpuInfo {
   return { ...gpu, vramFreeBytes: Math.round(gpu.vramTotalBytes * 0.9), freeEstimated: true };
 }
 
+interface GpuProbe {
+  gpus: GpuInfo[];
+  /** macOS: memory available to new allocations, from vm_stat. */
+  availableBytes?: number;
+}
+
+async function probeGpuState(deps: ProbeDeps): Promise<GpuProbe> {
+  try {
+    if (deps.platform === "win32") {
+      const mod = await import("./windows.js");
+      return { gpus: await mod.probeGpus(deps.run) };
+    }
+    if (deps.platform === "linux") {
+      const mod = await import("./linux.js");
+      return { gpus: await mod.probeGpus(deps.run) };
+    }
+    if (deps.platform === "darwin") {
+      const mod = await import("./darwin.js");
+      return await mod.probeDarwin(deps.run, deps.totalmem());
+    }
+  } catch {
+    // fall through: no GPU information
+  }
+  return { gpus: [] };
+}
+
 export function createHardwareProbe(overrides: Partial<ProbeDeps> = {}): HardwareProbe {
   const deps: ProbeDeps = { ...defaultDeps, ...overrides };
+  let cached: { at: number; value: Promise<GpuProbe> } | undefined;
+  const gpuState = (): Promise<GpuProbe> => {
+    const now = deps.now();
+    if (cached && deps.cacheTtlMs > 0 && now - cached.at < deps.cacheTtlMs) return cached.value;
+    // Concurrent callers share this one in-flight probe.
+    const value = probeGpuState(deps);
+    cached = { at: now, value };
+    return value;
+  };
   return {
     async getSystemResources(): Promise<SystemResources> {
-      const base: SystemResources = {
+      const state = await gpuState();
+      return {
         platform: deps.platform,
         ramTotalBytes: deps.totalmem(),
-        ramFreeBytes: deps.freemem(),
+        ramFreeBytes: state.availableBytes ?? deps.freemem(),
         cpuCount: deps.cpuCount(),
-        gpus: [],
+        gpus: state.gpus.map(withEstimatedFree),
       };
-      try {
-        if (deps.platform === "win32") {
-          const mod = await import("./windows.js");
-          base.gpus = await mod.probeGpus(deps.run);
-        } else if (deps.platform === "linux") {
-          const mod = await import("./linux.js");
-          base.gpus = await mod.probeGpus(deps.run);
-        } else if (deps.platform === "darwin") {
-          const mod = await import("./darwin.js");
-          const mac = await mod.probeDarwin(deps.run, base.ramTotalBytes);
-          base.gpus = mac.gpus;
-          if (mac.availableBytes !== undefined) base.ramFreeBytes = mac.availableBytes;
-        }
-      } catch {
-        base.gpus = [];
-      }
-      base.gpus = base.gpus.map(withEstimatedFree);
-      return base;
+    },
+    invalidate() {
+      cached = undefined;
     },
   };
 }

@@ -180,6 +180,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
     safe(async ({ model, keepAlive, contextLength, provider }, extra) => {
       const p = await manager.select(provider, model, reqOpts(config.detectTimeoutMs, extra), { capability: "load" });
       const result = await p.load(model, { ...reqOpts(config.requestTimeoutMs, extra), keepAlive, contextLength });
+      ctx.hardware.invalidate?.();
       changed();
       return ok({ load: result });
     }),
@@ -201,6 +202,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
     safe(async ({ model, provider }, extra) => {
       const p = await manager.select(provider, model, reqOpts(config.detectTimeoutMs, extra), { capability: "unload" });
       const result = await p.unload(model, reqOpts(config.requestTimeoutMs, extra));
+      ctx.hardware.invalidate?.();
       changed();
       return ok({ unload: result });
     }),
@@ -330,10 +332,12 @@ export async function ensureModel(
     manager.invalidate(p.name);
   }
   for (const m of evict) await p.unload(m.id, opts);
+  if (evict.length > 0) ctx.hardware.invalidate?.();
   const start = Date.now();
   let detail: string | undefined;
   if (caps.load) {
     const res = await p.load(args.model, { ...opts, keepAlive: args.keepAlive, contextLength: args.contextLength });
+    ctx.hardware.invalidate?.();
     detail = res.detail;
   }
   const loadMs = Date.now() - start;

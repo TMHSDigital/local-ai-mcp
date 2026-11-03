@@ -45,11 +45,14 @@ export function parseWindowsGpus(stdout: string): GpuInfo[] {
 }
 
 export async function probeGpus(run: CommandRunner): Promise<GpuInfo[]> {
-  const nvidia = await probeNvidia(run);
+  // Independent probes; run them together (PowerShell start-up alone is slow).
+  const [nvidia, ps] = await Promise.all([
+    probeNvidia(run),
+    run("powershell", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_GPU_SCRIPT], {
+      timeoutMs: PROBE_TIMEOUT_MS,
+    }).catch(() => undefined),
+  ]);
   let others: GpuInfo[] = [];
-  const ps = await run("powershell", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_GPU_SCRIPT], {
-    timeoutMs: PROBE_TIMEOUT_MS,
-  }).catch(() => undefined);
   if (ps && ps.status === 0 && ps.stdout.trim()) {
     try {
       others = parseWindowsGpus(ps.stdout);
