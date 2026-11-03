@@ -44,6 +44,9 @@ const responseFormatSchema = z.union([
 ]);
 
 /** Generation parameters shared by complete and delegate. */
+/** Upper bound for repairAttempts: each one is a full extra completion. */
+export const MAX_REPAIR_ATTEMPTS = 2;
+
 const generationShape = {
   prompt: z.string().optional().describe("Plain prompt text (alternative to messages)"),
   system: z.string().optional().describe("System instruction"),
@@ -68,6 +71,15 @@ const generationShape = {
     .optional()
     .describe("Constrain output to JSON (json_object) or a JSON Schema (json_schema); the result includes a validated 'parsed' value"),
   options: z.record(z.string(), z.unknown()).optional().describe("Provider-specific extras passed through as-is"),
+  repairAttempts: z
+    .number()
+    .int()
+    .min(0)
+    .max(MAX_REPAIR_ATTEMPTS)
+    .optional()
+    .describe(
+      `With a json_schema responseFormat: if the output fails validation, send the errors back to the same model and ask for corrected JSON, up to this many times (default 0, max ${MAX_REPAIR_ATTEMPTS}). Token usage covers every attempt.`,
+    ),
   stream: z
     .boolean()
     .optional()
@@ -89,6 +101,7 @@ type GenerationArgs = {
   responseFormat?: CompletionParams["responseFormat"];
   options?: Record<string, unknown>;
   stream?: boolean;
+  repairAttempts?: number;
 };
 
 /**
@@ -139,7 +152,7 @@ async function runCompletion(
   state: { emitted: boolean } = { emitted: false },
 ): Promise<CompletionResult> {
   const { config } = ctx;
-  const { stream, ...gen } = args;
+  const { stream, repairAttempts = 0, ...gen } = args;
   const wantStream = stream !== false;
   const send = progressSender(extra);
   let progress = 0;
@@ -161,11 +174,58 @@ async function runCompletion(
         onChunk,
       },
     );
-    return validateStructured(result, gen.responseFormat);
+    let checked = validateStructured(result, gen.responseFormat);
+    let used = 0;
+    let promptTokens = checked.promptTokens;
+    let completionTokens = checked.completionTokens;
+    while (needsRepair(checked, gen.responseFormat) && used < repairAttempts) {
+      used += 1;
+      // Repairs run without streaming: the client already saw the first answer.
+      const retry = await p.complete(
+        { ...gen, model, prompt: undefined, messages: repairMessages(gen, checked) },
+        reqOpts(config.requestTimeoutMs, extra),
+      );
+      checked = validateStructured(retry, gen.responseFormat);
+      promptTokens = sumTokens(promptTokens, checked.promptTokens);
+      completionTokens = sumTokens(completionTokens, checked.completionTokens);
+    }
+    if (used === 0) return checked;
+    return {
+      ...checked,
+      ...(promptTokens !== undefined ? { promptTokens } : {}),
+      ...(completionTokens !== undefined ? { completionTokens } : {}),
+      repairAttemptsUsed: used,
+    } as CompletionResult;
   } catch (err) {
     ctx.manager.invalidate(p.name);
     throw err;
   }
+}
+
+/** A json_schema reply that failed validation or did not parse as JSON at all. */
+function needsRepair(r: CompletionResult, format: GenerationArgs["responseFormat"]): boolean {
+  if (format?.type !== "json_schema") return false;
+  return r.parsed === undefined || (r as CompletionResult & { schemaValid?: boolean }).schemaValid === false;
+}
+
+function sumTokens(a: number | undefined, b: number | undefined): number | undefined {
+  return a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0);
+}
+
+/** The original conversation, the invalid reply, and a request to fix it. */
+function repairMessages(gen: Omit<GenerationArgs, "stream" | "repairAttempts">, bad: CompletionResult): ChatMessage[] {
+  const errors = (bad as CompletionResult & { schemaErrors?: string[] }).schemaErrors ?? [];
+  const history: ChatMessage[] = gen.messages?.length ? [...gen.messages] : [{ role: "user", content: gen.prompt ?? "" }];
+  return [
+    ...history,
+    { role: "assistant", content: bad.text },
+    {
+      role: "user",
+      content:
+        `Your previous reply did not match the required JSON schema:\n- ${errors.join("\n- ") || "invalid JSON"}\n` +
+        "Reply again with only the corrected JSON, no other text.",
+    },
+  ];
 }
 
 function requireInput(args: GenerationArgs): void {

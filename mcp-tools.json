@@ -806,6 +806,12 @@
           },
           "additionalProperties": {}
         },
+        "repairAttempts": {
+          "description": "With a json_schema responseFormat: if the output fails validation, send the errors back to the same model and ask for corrected JSON, up to this many times (default 0, max 2). Token usage covers every attempt.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2
+        },
         "stream": {
           "description": "Stream tokens (default true). Progress notifications are sent when the client provides a progressToken.",
           "type": "boolean"
@@ -1067,6 +1073,12 @@
             "type": "string"
           },
           "additionalProperties": {}
+        },
+        "repairAttempts": {
+          "description": "With a json_schema responseFormat: if the output fails validation, send the errors back to the same model and ask for corrected JSON, up to this many times (default 0, max 2). Token usage covers every attempt.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2
         },
         "stream": {
           "description": "Stream tokens (default true). Progress notifications are sent when the client provides a progressToken.",

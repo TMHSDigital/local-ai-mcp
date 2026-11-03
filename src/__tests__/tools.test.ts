@@ -239,6 +239,65 @@ describe("lifecycle", () => {
   });
 });
 
+describe("structured output repair", () => {
+  const schema = { type: "object", required: ["name"], properties: { name: { type: "string" } } };
+  const replying = (replies: unknown[]) => {
+    const p = new FakeProvider("ollama", { models: ["m:7b"] });
+    const seen: any[] = [];
+    p.complete = async (params) => {
+      seen.push(params);
+      const parsed = replies[seen.length - 1];
+      return {
+        provider: p.name,
+        host: p.host,
+        local: true,
+        model: params.model,
+        text: parsed === undefined ? "not json" : JSON.stringify(parsed),
+        ...(parsed === undefined ? {} : { parsed }),
+        promptTokens: 10,
+        completionTokens: 5,
+      };
+    };
+    return { p, seen };
+  };
+  const args = (extra: Record<string, unknown> = {}) => ({
+    model: "m:7b",
+    prompt: "who?",
+    stream: false,
+    responseFormat: { type: "json_schema", schema },
+    ...extra,
+  });
+
+  it("re-prompts with the validation errors and returns the corrected result", async () => {
+    const { p, seen } = replying([{ nope: 1 }, { name: "Ada" }]);
+    const { client } = await connect([p]);
+    const out = await call(client, "complete", args({ repairAttempts: 1 }));
+    expect(out).toMatchObject({ parsed: { name: "Ada" }, schemaValid: true, repairAttemptsUsed: 1, promptTokens: 20, completionTokens: 10 });
+    const retry = seen[1];
+    expect(retry.prompt).toBeUndefined();
+    expect(retry.messages.at(0)).toEqual({ role: "user", content: "who?" });
+    expect(retry.messages.at(1)).toEqual({ role: "assistant", content: '{"nope":1}' });
+    expect(retry.messages.at(2).content).toMatch(/required property 'name'/);
+  });
+
+  it("repairs output that is not JSON at all, and stops at the limit", async () => {
+    const { p, seen } = replying([undefined, undefined, undefined]);
+    const { client } = await connect([p]);
+    const out = await call(client, "complete", args({ repairAttempts: 2 }));
+    expect(seen).toHaveLength(3);
+    expect(out.repairAttemptsUsed).toBe(2);
+  });
+
+  it("does nothing extra by default", async () => {
+    const { p, seen } = replying([{ nope: 1 }]);
+    const { client } = await connect([p]);
+    const out = await call(client, "complete", args());
+    expect(seen).toHaveLength(1);
+    expect(out).toMatchObject({ schemaValid: false });
+    expect(out.repairAttemptsUsed).toBeUndefined();
+  });
+});
+
 describe("ensure_model", () => {
   const gpu = (free: number) => resources({ ramFreeBytes: 64 * GB, gpus: [{ name: "gpu", vramFreeBytes: free * GB, source: "t" }] });
   const ops = (p: FakeProvider, op: string) => p.calls.filter((c) => c.op === op).map((c) => c.model);
