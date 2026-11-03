@@ -65,3 +65,7 @@ Desktop.ini
 
 # GPU driver logs written to the working directory (probes now run from the temp dir)
 NVIDIA Corporation/
+
+# --- Local audit and agent reports (may contain unpublished security detail) ---
+.claude-reports/
+*-SENSITIVE.md
