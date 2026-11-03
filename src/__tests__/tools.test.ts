@@ -324,6 +324,64 @@ describe("delegate", () => {
     );
   });
 
+  describe("allowPull and filters", () => {
+    const gpu20 = resources({ gpus: [{ name: "gpu", vramFreeBytes: 20 * GB, source: "t" }] });
+
+    it("pulls the best catalog model for the task when nothing suitable is installed", async () => {
+      const p = new FakeProvider("ollama", { models: ["nomic-embed-text"] });
+      const { client } = await connect([p], { hw: gpu20 });
+      const out = await call(client, "delegate", { task: "code", prompt: "x", stream: false, allowPull: true });
+      expect(out.routing).toMatchObject({ pulled: true, tier: "pull" });
+      const ops = p.calls.map((c) => c.op).filter((op) => op === "pull" || op === "complete");
+      expect(ops).toEqual(["pull", "complete"]);
+      expect(p.calls.find((c) => c.op === "pull")?.model).toBe(out.routing.model);
+    });
+
+    it("does not pull without an Ollama provider", async () => {
+      const lms = new FakeProvider("lmstudio", { type: "lmstudio", models: ["nomic-embed-text"] });
+      const { client } = await connect([lms], { hw: gpu20 });
+      await expect(call(client, "delegate", { task: "chat", prompt: "x", allowPull: true })).rejects.toThrow(/No suitable/);
+      expect(lms.calls.some((c) => c.op === "pull")).toBe(false);
+    });
+
+    it("does not pull when no catalog model fits", async () => {
+      const p = new FakeProvider("ollama", { models: ["nomic-embed-text"] });
+      const tiny = resources({ ramFreeBytes: 0.5 * GB, gpus: [{ name: "gpu", vramFreeBytes: 0.5 * GB, source: "t" }] });
+      const { client } = await connect([p], { hw: tiny });
+      await expect(call(client, "delegate", { task: "chat", prompt: "x", allowPull: true })).rejects.toThrow(/No suitable/);
+      expect(p.calls.some((c) => c.op === "pull")).toBe(false);
+    });
+
+    it("uses a loaded model even when it would not fit if loaded fresh", async () => {
+      const p = new FakeProvider("ollama", {
+        models: [{ id: "llama3.1:70b", sizeBytes: 40 * GB }],
+        loaded: [{ id: "llama3.1:70b", sizeBytes: 40 * GB }],
+      });
+      const { client } = await connect([p], { hw: resources({ ramFreeBytes: 4 * GB, gpus: [{ name: "gpu", vramFreeBytes: 2 * GB, source: "t" }] }) });
+      const out = await call(client, "delegate", { task: "chat", prompt: "x", stream: false });
+      expect(out.routing).toMatchObject({ model: "llama3.1:70b", tier: "loaded" });
+    });
+
+    it("restricts candidates to the named provider", async () => {
+      const a = new FakeProvider("ollama", { models: [{ id: "qwen2.5:14b", sizeBytes: 9 * GB }] });
+      const b = new FakeProvider("lmstudio", { type: "lmstudio", models: [{ id: "llama3.1:8b", sizeBytes: 4.9 * GB }] });
+      const { client } = await connect([a, b], { hw: gpu20 });
+      const out = await call(client, "delegate", { task: "chat", prompt: "x", stream: false, provider: "lmstudio" });
+      expect(out.routing.considered.map((c: any) => c.provider)).toEqual(["lmstudio"]);
+    });
+
+    it("invalidates the provider cache when the completion fails", async () => {
+      const p = new FakeProvider("ollama", { models: [{ id: "llama3.1:8b", sizeBytes: 4.9 * GB }] });
+      p.complete = async () => {
+        throw new Error("runtime crashed");
+      };
+      const { client, ctx } = await connect([p], { hw: gpu20 });
+      const spy = vi.spyOn(ctx.manager, "invalidate");
+      await expect(call(client, "delegate", { task: "chat", prompt: "x", stream: false })).rejects.toThrow(/runtime crashed/);
+      expect(spy).toHaveBeenCalledWith("ollama");
+    });
+  });
+
   describe("fallback", () => {
     const twoModels = () => {
       const p = new FakeProvider("ollama", {
