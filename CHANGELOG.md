@@ -7,6 +7,12 @@ tags that version and publishes it.
 
 ## [Unreleased]
 
+### Fixed
+
+- CI validates `mcpb/manifest.json` with `mcpb validate`, and `release.yml`
+  will not tag a version until the manifest passes, so a broken Claude Desktop
+  manifest can no longer fail `publish.yml` after the release already exists.
+
 ## [0.5.0] - 2026-10-31
 
 ### Breaking

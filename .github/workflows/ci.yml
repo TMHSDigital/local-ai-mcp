@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   checks:
-    name: Lint, typecheck, audit, manifest
+    name: Lint, typecheck, audit, manifests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -35,6 +35,8 @@ jobs:
             echo "::error::mcp-tools.json is stale. Run 'npm run gen:tools' and commit the result."
             exit 1
           }
+      - name: Claude Desktop manifest is valid
+        run: npx -y @anthropic-ai/mcpb@2.1.2 validate mcpb/manifest.json
 
   test:
     name: Test (${{ matrix.os }}, Node ${{ matrix.node-version }})
