@@ -161,8 +161,13 @@ describe("tools route through ProviderManager.pool", () => {
     for (const f of readdirSync(dir).filter((n) => n.endsWith(".ts"))) {
       const src = readFileSync(join(dir, f), "utf8");
       expect(src, `${f} should use manager.pool() instead of detected().filter(kind)`).not.toMatch(
-        /detected\([^;]*?\.filter\([\s\S]{0,80}?\.kindb/,
+        /detected\([^;]*?\.filter\([\s\S]{0,80}?\.kind\b/,
       );
     }
+  });
+
+  it("the guard pattern catches the old per-tool filter", () => {
+    const old = `const live = (await manager.detected(detectOpts)).filter(\n  (p) => p.kind === "local",\n);`;
+    expect(old).toMatch(/detected\([^;]*?\.filter\([\s\S]{0,80}?\.kind\b/);
   });
 });
