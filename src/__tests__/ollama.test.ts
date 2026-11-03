@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { HttpError } from "../http.js";
 import { OllamaProvider, parseOllamaArchitecture } from "../providers/ollama.js";
 import { mockFetch } from "./support.js";
 
@@ -77,6 +78,31 @@ describe("OllamaProvider", () => {
       "x.attention.key_length": 64,
     });
     expect(r.architecture).toEqual({ layers: 4, kvHeads: 2, keyLength: 64, valueLength: 64 });
+  });
+
+  it("reads context length from any *.context_length key when general.architecture is missing", () => {
+    const r = parseOllamaArchitecture({
+      "qwen2.context_length": 32768,
+      "qwen2.block_count": 28,
+      "general.parameter_count": 7.6e9,
+    });
+    expect(r).toEqual({ contextLength: 32768, parameterCount: 7.6e9 });
+    expect(r).not.toHaveProperty("architecture");
+  });
+
+  it("removes via DELETE /api/delete with the model in the body", async () => {
+    const calls = mockFetch(() => ({ text: "" }));
+    const r = await new OllamaProvider(HOST).remove("m:7b", OPTS);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ method: "DELETE", url: `${HOST}/api/delete`, body: { model: "m:7b" } });
+    expect(r).toEqual({ provider: "ollama", model: "m:7b", removed: true });
+  });
+
+  it("rejects remove with HttpError on 404", async () => {
+    mockFetch(() => ({ status: 404, body: { error: "model 'm:7b' not found" } }));
+    const err = await new OllamaProvider(HOST).remove("m:7b", OPTS).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HttpError);
+    expect((err as HttpError).status).toBe(404);
   });
 
   it("completes via native /api/chat with num_ctx, options and JSON-schema format", async () => {
