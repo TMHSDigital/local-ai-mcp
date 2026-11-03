@@ -51,7 +51,8 @@
         "LOCAL_AI_ALLOW_HOSTED_FALLBACK": "${user_config.allow_hosted_fallback}",
         "LOCAL_AI_DISABLE": "${user_config.disabled_providers}",
         "LOCAL_AI_PROVIDERS": "${user_config.extra_providers}",
-        "LOCAL_AI_DISABLE_NETWORK_SEARCH": "${user_config.disable_network_search}"
+        "LOCAL_AI_DISABLE_NETWORK_SEARCH": "${user_config.disable_network_search}",
+        "LOCAL_AI_BENCHMARK_CACHE": "${user_config.benchmark_cache}"
       }
     }
   },
@@ -170,6 +171,13 @@
       "description": "Keep search_models offline (catalog only)",
       "default": false,
       "required": false
+    },
+    "benchmark_cache": {
+      "type": "string",
+      "title": "Benchmark results file (optional)",
+      "description": "Where benchmark speeds are kept for delegate ranking. Leave blank for the per-user cache dir; \"off\" disables.",
+      "default": "",
+      "required": false
     }
   },
   "compatibility": {
@@ -257,7 +265,7 @@
     },
     {
       "name": "delegate",
-      "description": "ONE CALL to offload work locally: pick the best model for a task on THIS machine, make it ready, and run it. Prefers models already loaded (no load cost), then installed models that fit your free VRAM, then (with allowPull) the best catalog model that fits. Task specialists (coder, vision, reasoning) win over general models; larger fitting models win over smaller. Never uses a hosted provider unless allowHosted is true. Returns the completion plus a 'routing' block explaining the choice."
+      "description": "ONE CALL to offload work locally: pick the best model for a task on THIS machine, make it ready, and run it. Prefers models already loaded (no load cost), then installed models that fit your free VRAM, then (with allowPull) the best catalog model that fits. Task specialists (coder, vision, reasoning) win over general models; among equals, models benchmarked on this machine win by measured speed (run benchmark to record it; results expire after 14 days), otherwise larger fitting models win over smaller. Never uses a hosted provider unless allowHosted is true. Returns the completion plus a 'routing' block explaining the choice."
     }
   ]
 }

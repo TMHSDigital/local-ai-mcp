@@ -7,6 +7,18 @@ tags that version and publishes it.
 
 ## [Unreleased]
 
+### Added
+
+- `delegate` ranks by measured speed on this machine. `benchmark` now saves
+  each local result (median tok/s, time to first token, running context,
+  quantization, size, provider, timestamp) to a small per-user cache outside
+  any project (`LOCAL_AI_BENCHMARK_CACHE`; `off` disables). Among candidates
+  with the same specialty and readiness, benchmarked models rank first,
+  fastest first; the rest fall back to size. Results expire after 14 days, on
+  a hardware change, or when the model's quantization or file changes.
+  `routing.why` states which rule chose the model. Tool input and output
+  schemas are unchanged.
+
 ### Fixed
 
 - Claude Desktop bundle settings now cover every runtime and option the server

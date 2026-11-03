@@ -107,6 +107,11 @@
           "name": "LOCAL_AI_DISABLE_NETWORK_SEARCH",
           "description": "Keep search_models offline (catalog only)",
           "isRequired": false
+        },
+        {
+          "name": "LOCAL_AI_BENCHMARK_CACHE",
+          "description": "Benchmark results file used to rank delegate by measured speed (default: per-user cache dir; off disables)",
+          "isRequired": false
         }
       ]
     }

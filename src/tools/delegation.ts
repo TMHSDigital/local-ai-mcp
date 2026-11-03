@@ -12,6 +12,7 @@ import type {
   Provider,
 } from "../providers/types.js";
 import { rankSuggestions } from "./catalog.js";
+import { machineFingerprint, type SpeedRecord } from "../speed-cache.js";
 import type { ToolContext } from "./context.js";
 import { anyRecord, type Extra, ok, progressSender, providerArg, reqOpts, safe } from "./helpers.js";
 import { ensureModel } from "./lifecycle.js";
@@ -172,19 +173,38 @@ export interface Candidate {
   specialist: boolean;
   sizeBytes?: number;
   fitTarget?: string;
+  /** Fresh benchmark of this model on this machine, if any. */
+  speed?: SpeedRecord;
 }
 
 /**
- * Score candidates: loaded beats installed beats pull (no load cost); a task
- * specialist beats a general model; then larger (more capable) first.
+ * Score candidates: a task specialist beats a general model; loaded beats
+ * installed beats pull (no load cost). Within that, models with a fresh
+ * benchmark on this machine come first, fastest first (measured beats
+ * guessed); the rest fall back to size, larger (more capable) first.
  */
 export function rankCandidates(cands: Candidate[]): Candidate[] {
   const tier = { loaded: 0, installed: 1, pull: 2 } as const;
   return [...cands].sort((a, b) => {
     if (a.specialist !== b.specialist) return a.specialist ? -1 : 1;
     if (tier[a.tier] !== tier[b.tier]) return tier[a.tier] - tier[b.tier];
+    if (!!a.speed !== !!b.speed) return a.speed ? -1 : 1;
+    if (a.speed && b.speed) return b.speed.genTokensPerSec - a.speed.genTokensPerSec;
     return (b.sizeBytes ?? 0) - (a.sizeBytes ?? 0);
   });
+}
+
+/** The ranking reason for the routing explanation. */
+export function rankingReason(chosen: Candidate, ranked: Candidate[]): string {
+  if (chosen.speed) {
+    const s = chosen.speed;
+    const est = s.estimated ? ", estimated" : "";
+    return `ranked by measured speed: ${s.genTokensPerSec} tok/s on this machine (benchmark ${s.measuredAt.slice(0, 10)}${est})`;
+  }
+  const measured = ranked.filter((c) => c.speed).length;
+  return measured > 0
+    ? "ranked by size: outranks benchmarked models by specialty or readiness"
+    : "ranked by size: no fresh benchmark on this machine (run benchmark to rank by speed)";
 }
 
 export function register(server: McpServer, ctx: ToolContext): void {
@@ -252,7 +272,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
     {
       title: "Delegate a task to the best local model",
       description:
-        "ONE CALL to offload work locally: pick the best model for a task on THIS machine, make it ready, and run it. Prefers models already loaded (no load cost), then installed models that fit your free VRAM, then (with allowPull) the best catalog model that fits. Task specialists (coder, vision, reasoning) win over general models; larger fitting models win over smaller. Never uses a hosted provider unless allowHosted is true. Returns the completion plus a 'routing' block explaining the choice.",
+        "ONE CALL to offload work locally: pick the best model for a task on THIS machine, make it ready, and run it. Prefers models already loaded (no load cost), then installed models that fit your free VRAM, then (with allowPull) the best catalog model that fits. Task specialists (coder, vision, reasoning) win over general models; among equals, models benchmarked on this machine win by measured speed (run benchmark to record it; results expire after 14 days), otherwise larger fitting models win over smaller. Never uses a hosted provider unless allowHosted is true. Returns the completion plus a 'routing' block explaining the choice.",
       inputSchema: {
         task: z.enum(DELEGATE_TASKS).describe("What kind of work this is"),
         ...generationShape,
@@ -281,6 +301,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
       if (provider) pool = pool.filter((p) => p.name === provider);
       const resources = await hardware.getSystemResources();
       const contextLength = gen.contextLength;
+      const speedOf = ctx.speeds.lookup(machineFingerprint(resources));
 
       const cands: Candidate[] = [];
       await Promise.all(
@@ -319,6 +340,10 @@ export function register(server: McpServer, ctx: ToolContext): void {
               specialist,
               sizeBytes,
               fitTarget,
+              speed:
+                p.kind === "local"
+                  ? speedOf(p.host, m.id, { quantization: listed?.quantization, sizeBytes: listed?.sizeBytes })
+                  : undefined,
             });
           }
         }),
@@ -348,6 +373,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
         chosen.tier === "loaded" ? "already loaded (no load cost)" : chosen.tier === "pull" ? "downloaded: nothing suitable was installed" : "installed",
         chosen.specialist ? `${tag} specialist` : "general model",
         chosen.fitTarget ? `fits: ${chosen.fitTarget}` : undefined,
+        rankingReason(chosen, ranked),
       ]
         .filter(Boolean)
         .join("; ");

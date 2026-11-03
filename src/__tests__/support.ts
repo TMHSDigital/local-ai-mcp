@@ -5,6 +5,7 @@ import type { Config } from "../config.js";
 import { loadConfig } from "../config.js";
 import type { HardwareProbe, SystemResources } from "../hardware/index.js";
 import { createServer } from "../server.js";
+import type { SpeedCache } from "../speed-cache.js";
 import {
   UnsupportedOperationError,
   type CompletionChunkHandler,
@@ -95,15 +96,23 @@ export function fakeHardware(r: SystemResources = resources()): HardwareProbe {
 }
 
 export function testConfig(over: Partial<Config> = {}): Config {
-  return { ...loadConfig({}), cacheTtlMs: 0, ...over };
+  // benchmarkCachePath undefined: tests never touch the real per-user cache.
+  return { ...loadConfig({}), cacheTtlMs: 0, benchmarkCachePath: undefined, ...over };
 }
 
 /**
  * Real server + adapters built from env-style config, connected to an MCP
  * client in memory. Pair with mockFetch to test tools at the HTTP layer.
  */
-export async function connectFromEnv(env: Record<string, string>, hw: SystemResources = resources()) {
-  const { server, ctx } = createServer({ ...loadConfig(env), cacheTtlMs: 0 }, { hardware: fakeHardware(hw) });
+export async function connectFromEnv(
+  env: Record<string, string>,
+  hw: SystemResources = resources(),
+  speeds?: SpeedCache,
+) {
+  const { server, ctx } = createServer(
+    { ...loadConfig(env), cacheTtlMs: 0, benchmarkCachePath: undefined },
+    { hardware: fakeHardware(hw), ...(speeds ? { speeds } : {}) },
+  );
   const client = new Client({ name: "test", version: "0" });
   const [ct, st] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(st), client.connect(ct)]);

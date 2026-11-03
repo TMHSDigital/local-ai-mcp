@@ -1,9 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { computeFit, KV_CACHE_TYPES } from "../fit.js";
-import type { CompletionResult, Provider } from "../providers/types.js";
+import type { CompletionResult, Provider, RequestOptions } from "../providers/types.js";
+import { machineFingerprint } from "../speed-cache.js";
 import type { ToolContext } from "./context.js";
-import { aggregate, anyRecord, type Extra, ok, perProvider, providerArg, reqOpts, safe } from "./helpers.js";
+import { aggregate, anyRecord, errMsg, type Extra, ok, perProvider, providerArg, reqOpts, safe } from "./helpers.js";
 import { sizeModel } from "./sizing.js";
 
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
@@ -100,6 +101,42 @@ async function benchmarkOne(
     estimated: runs.some((r) => r.estimated),
     samples: runs,
   };
+}
+
+/**
+ * Persist a local benchmark so delegate can rank by measured speed. Adds the
+ * model's quantization, size and running context when the runtime reports
+ * them. Never fails the benchmark: a cache write error is logged to stderr.
+ */
+async function rememberSpeed(
+  ctx: ToolContext,
+  p: Provider,
+  res: Awaited<ReturnType<typeof benchmarkOne>>,
+  machine: string,
+  opts: RequestOptions,
+): Promise<void> {
+  const genTokensPerSec = res.genTokensPerSec.median;
+  if (p.kind !== "local" || genTokensPerSec === undefined) return;
+  const [listed, loaded] = await Promise.all([
+    ctx.manager.listModelsCached(p, opts).then((ms) => ms.find((m) => m.id === res.model)).catch(() => undefined),
+    p.listLoaded(opts).then((ls) => ls.find((m) => m.id === res.model)).catch(() => undefined),
+  ]);
+  try {
+    ctx.speeds.record({
+      machine,
+      host: p.host,
+      provider: p.name,
+      model: res.model,
+      genTokensPerSec,
+      ...(res.ttftMs.median !== undefined ? { ttftMs: res.ttftMs.median } : {}),
+      ...(loaded?.contextLength ? { contextLength: loaded.contextLength } : {}),
+      ...(listed?.quantization ? { quantization: listed.quantization } : {}),
+      ...(listed?.sizeBytes ? { sizeBytes: listed.sizeBytes } : {}),
+      estimated: res.estimated,
+    });
+  } catch (err) {
+    process.stderr.write(`local-ai-mcp: could not save benchmark to ${ctx.speeds.path}: ${errMsg(err)}\n`);
+  }
 }
 
 export function register(server: McpServer, ctx: ToolContext): void {
@@ -238,10 +275,13 @@ export function register(server: McpServer, ctx: ToolContext): void {
         warmup: warmup ?? true,
       };
       const results: Record<string, unknown>[] = [];
+      const machine = ctx.speeds.enabled ? machineFingerprint(await hardware.getSystemResources()) : undefined;
       for (const m of targets) {
         try {
           const p = await manager.select(provider, m, reqOpts(config.detectTimeoutMs, extra), { capability: "complete" });
-          results.push(await benchmarkOne(ctx, p, m, args, extra));
+          const res = await benchmarkOne(ctx, p, m, args, extra);
+          results.push(res);
+          if (machine) await rememberSpeed(ctx, p, res, machine, reqOpts(config.requestTimeoutMs, extra));
         } catch (err) {
           results.push({ model: m, error: err instanceof Error ? err.message : String(err) });
         }

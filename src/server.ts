@@ -6,6 +6,7 @@ import { loadConfig, type Config } from "./config.js";
 import { createHardwareProbe, type HardwareProbe } from "./hardware/index.js";
 import { ProviderManager } from "./providers/manager.js";
 import type { Provider } from "./providers/types.js";
+import { SpeedCache } from "./speed-cache.js";
 import type { ToolContext } from "./tools/context.js";
 import { registerAll } from "./tools/index.js";
 
@@ -29,10 +30,15 @@ export const SERVER_INSTRUCTIONS =
 /** Build a fully wired server (no transport). Used by the CLI entry point and tests. */
 export function createServer(
   config: Config = loadConfig(process.env),
-  deps: { hardware?: HardwareProbe; providers?: Provider[] } = {},
+  deps: { hardware?: HardwareProbe; providers?: Provider[]; speeds?: SpeedCache } = {},
 ): { server: McpServer; ctx: ToolContext } {
   const manager = new ProviderManager(config, { providers: deps.providers });
-  const ctx: ToolContext = { manager, hardware: deps.hardware ?? createHardwareProbe(), config };
+  const ctx: ToolContext = {
+    manager,
+    hardware: deps.hardware ?? createHardwareProbe(),
+    config,
+    speeds: deps.speeds ?? new SpeedCache(config.benchmarkCachePath),
+  };
   const server = new McpServer(
     { name: "local-ai-mcp", version: readVersion() },
     { instructions: SERVER_INSTRUCTIONS },

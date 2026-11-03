@@ -112,7 +112,7 @@ Every tool declares MCP annotations (read-only, destructive, open-world) and an 
 | | `search_models` | Live Hugging Face GGUF search with per-quantization fit and pull references (`hf.co/<repo>:<quant>`) |
 | Delegation | `complete` | Run a completion on a model you choose: system prompt, JSON / JSON-schema output (validated), seed, sampling, images, `contextLength` |
 | | `embed` | Embeddings, always one vector per input |
-| | `delegate` | **One call:** picks the best local model for a task (loaded, then installed and fitting, then optionally pulled), runs it, and explains the choice |
+| | `delegate` | **One call:** picks the best local model for a task (loaded, then installed and fitting, then optionally pulled; among equals, fastest as measured by `benchmark` on this machine), runs it, and explains the choice |
 
 **Resources:** `local-ai://system`, `local-ai://loaded` (subscribable; updates when models load or unload), and `local-ai://models/{provider}`.
 **Prompts:** `setup`, `free-vram`, `benchmark-my-models`, `pick-model`.
@@ -130,6 +130,7 @@ Every setting is an environment variable, and blank means the default. See [`.en
 | `MOONSHOT_API_KEY`, `MOONSHOT_HOST` | unset, `https://api.moonshot.ai/v1` | Hosted Moonshot provider |
 | `LOCAL_AI_ALLOW_HOSTED_FALLBACK` | off | Let calls without a `provider` use hosted providers |
 | `LOCAL_AI_DISABLE_NETWORK_SEARCH` | off | Forbid Hugging Face search |
+| `LOCAL_AI_BENCHMARK_CACHE` | per-user cache dir | Where `benchmark` results are kept for `delegate` ranking (expire after 14 days); `off` disables |
 | `LOCAL_AI_REQUEST_TIMEOUT_MS` | `120000` | Non-streamed requests |
 | `LOCAL_AI_DETECT_TIMEOUT_MS` | `1500` | Detection probes |
 | `LOCAL_AI_PULL_TIMEOUT_MS` | `3600000` | Downloads (`0` = no limit) |

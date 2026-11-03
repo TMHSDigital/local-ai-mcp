@@ -885,7 +885,7 @@
   {
     "name": "delegate",
     "title": "Delegate a task to the best local model",
-    "description": "ONE CALL to offload work locally: pick the best model for a task on THIS machine, make it ready, and run it. Prefers models already loaded (no load cost), then installed models that fit your free VRAM, then (with allowPull) the best catalog model that fits. Task specialists (coder, vision, reasoning) win over general models; larger fitting models win over smaller. Never uses a hosted provider unless allowHosted is true. Returns the completion plus a 'routing' block explaining the choice.",
+    "description": "ONE CALL to offload work locally: pick the best model for a task on THIS machine, make it ready, and run it. Prefers models already loaded (no load cost), then installed models that fit your free VRAM, then (with allowPull) the best catalog model that fits. Task specialists (coder, vision, reasoning) win over general models; among equals, models benchmarked on this machine win by measured speed (run benchmark to record it; results expire after 14 days), otherwise larger fitting models win over smaller. Never uses a hosted provider unless allowHosted is true. Returns the completion plus a 'routing' block explaining the choice.",
     "inputSchema": {
       "type": "object",
       "properties": {

@@ -1,4 +1,5 @@
 import { PROVIDER_IDS, type ProviderId, type ProviderKind } from "./providers/types.js";
+import { defaultSpeedCachePath } from "./speed-cache.js";
 
 /** One configured provider instance. */
 export interface ProviderInstanceConfig {
@@ -26,6 +27,8 @@ export interface Config {
   streamMaxMs: number;
   /** How long detection / model-list results are cached. 0 disables. */
   cacheTtlMs: number;
+  /** File where benchmark results are kept for delegate ranking. Undefined disables it. */
+  benchmarkCachePath?: string;
 }
 
 export function normalizeHost(value: string): string {
@@ -205,5 +208,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     streamIdleTimeoutMs: parseNonNegativeEnv(env.LOCAL_AI_STREAM_IDLE_TIMEOUT_MS, 60000),
     streamMaxMs: parseNonNegativeEnv(env.LOCAL_AI_STREAM_MAX_MS, 1800000),
     cacheTtlMs: parseNonNegativeEnv(env.LOCAL_AI_CACHE_TTL_MS, 10000),
+    benchmarkCachePath: parseCachePath(env.LOCAL_AI_BENCHMARK_CACHE),
   };
+}
+
+/** Blank means the per-user default; off/false/0/none disables the cache. */
+function parseCachePath(value: string | undefined): string | undefined {
+  const v = value?.trim();
+  if (!v) return defaultSpeedCachePath();
+  if (/^(off|false|0|no|none)$/i.test(v)) return undefined;
+  return v;
 }
