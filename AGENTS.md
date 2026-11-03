@@ -56,7 +56,7 @@ If `package.json` has a version with no matching tag, it creates `v<version>` (p
 
 ### `publish.yml` (release published or manual)
 
-Runs lint, typecheck, build, tests, and smoke, then publishes to npm with provenance, builds and attaches the Claude Desktop `.mcpb` bundle, and publishes `server.json` to the MCP Registry (GitHub OIDC).
+Two jobs. `build` (read-only token, no OIDC) runs `npm ci`, lint, typecheck, build, tests, and smoke, then packs the npm tarball and the Claude Desktop `.mcpb` bundle as an artifact. `publish` (the only job with `id-token: write`, bound to the `release` environment) installs nothing: it publishes the prebuilt tarball to npm with provenance, attaches the `.mcpb` to the release, and publishes `server.json` to the MCP Registry (GitHub OIDC) with a checksum-verified `mcp-publisher`. Manual dispatch only runs from `main`.
 
 ### `drift-check.yml`, `pages.yml`, `stale.yml`, `label-sync.yml`
 
