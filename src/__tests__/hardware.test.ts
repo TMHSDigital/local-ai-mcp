@@ -27,7 +27,12 @@ describe("nvidia-smi", () => {
 });
 
 describe("windows", () => {
-  it("reads 64-bit registry memory sizes and drops virtual adapters", () => {
+  // Decision (#96): registry entries are deduplicated by adapter name. The probe
+  // output carries no registry path or LUID, and Class\{...}\000N keys persist
+  // for removed adapters, so keying on the path would count stale cards. The
+  // trade-off: two identical non-NVIDIA cards count once (NVIDIA cards come from
+  // nvidia-smi, which lists each physical GPU).
+  it("reads 64-bit registry memory sizes, drops virtual adapters, and collapses same-name entries (identical cards count once)", () => {
     const out = parseWindowsGpus(
       JSON.stringify([
         { Name: "AMD Radeon RX 7900 XTX", Bytes: 25753026560, Source: "registry" },
@@ -54,6 +59,23 @@ describe("windows", () => {
       ["NVIDIA GeForce RTX 3060", "nvidia-smi"],
       ["Intel(R) UHD Graphics 770", "registry"],
     ]);
+  });
+
+  it("parses a single object instead of an array", () => {
+    expect(parseWindowsGpus(JSON.stringify({ Name: "AMD Radeon RX 6800", Bytes: 17163091968, Source: "wmi" }))).toEqual([
+      { name: "AMD Radeon RX 6800", vramTotalBytes: 17163091968, source: "wmi" },
+    ]);
+  });
+
+  it.each([
+    ["empty stdout", { stdout: "" }],
+    ["garbage stdout", { stdout: "Get-ItemProperty : access denied" }],
+    ["a non-zero exit", { status: 1, stdout: "[]" }],
+  ])("returns the NVIDIA list only when PowerShell gives %s", async (_label, ps) => {
+    const gpus = await probeWindows(
+      runner({ "nvidia-smi": { stdout: "NVIDIA GeForce RTX 3060, 12288, 11000\n" }, powershell: ps }),
+    );
+    expect(gpus.map((g) => [g.name, g.source])).toEqual([["NVIDIA GeForce RTX 3060", "nvidia-smi"]]);
   });
 });
 
@@ -82,6 +104,64 @@ describe("linux", () => {
       fs,
     );
     expect(gpus).toEqual([{ name: "AMD Navi 31", vramTotalBytes: 24 * GiB, vramFreeBytes: 22 * GiB, source: "sysfs" }]);
+  });
+
+  /** Fake sysfs: per-card vendor, PCI slot and VRAM files. */
+  function sysfs(cards: Record<string, { vendor: string; slot: string; total?: number; used?: number }>): SysfsReader {
+    const files: Record<string, string> = {};
+    for (const [card, c] of Object.entries(cards)) {
+      const dev = `/sys/class/drm/${card}/device`;
+      files[`${dev}/vendor`] = c.vendor;
+      if (c.total !== undefined) files[`${dev}/mem_info_vram_total`] = String(c.total);
+      if (c.used !== undefined) files[`${dev}/mem_info_vram_used`] = String(c.used);
+    }
+    const norm = (p: string) => p.replace(/\\/g, "/");
+    return {
+      list: async () => Object.keys(cards),
+      read: async (p) => files[norm(p)],
+      resolve: async (p) => `/sys/devices/pci0000:00/${cards[norm(p).split("/")[4]].slot}`,
+    };
+  }
+  const noLspci = runner({});
+
+  it("skips sysfs cards with an unknown vendor id", async () => {
+    const gpus = await probeLinux(
+      noLspci,
+      sysfs({
+        card0: { vendor: "0x1af4", slot: "0000:00:01.0", total: 1 * GiB },
+        card1: { vendor: "0x1002", slot: "0000:03:00.0", total: 16 * GiB, used: 0 },
+      }),
+    );
+    expect(gpus.map((g) => g.name)).toEqual(["AMD GPU (0000:03:00.0)"]);
+  });
+
+  it("counts DRM cards on the same PCI slot once, and same-name cards on different slots twice", async () => {
+    const amd = { vendor: "0x1002", total: 24 * GiB, used: 0 };
+    const sameSlot = await probeLinux(
+      noLspci,
+      sysfs({ card0: { ...amd, slot: "0000:03:00.0" }, card1: { ...amd, slot: "0000:03:00.0" } }),
+    );
+    expect(sameSlot).toHaveLength(1);
+
+    const lspci = runner({
+      lspci: {
+        stdout: [
+          "0000:03:00.0 VGA compatible controller: AMD Navi 31",
+          "0000:04:00.0 VGA compatible controller: AMD Navi 31",
+        ].join("\n"),
+      },
+    });
+    const twoSlots = await probeLinux(
+      lspci,
+      sysfs({ card0: { ...amd, slot: "0000:03:00.0" }, card1: { ...amd, slot: "0000:04:00.0" } }),
+    );
+    expect(twoSlots.map((g) => g.name)).toEqual(["AMD Navi 31", "AMD Navi 31"]);
+    expect(twoSlots.reduce((sum, g) => sum + (g.vramTotalBytes ?? 0), 0)).toBe(48 * GiB);
+  });
+
+  it("reports total without free VRAM when mem_info_vram_used is missing", async () => {
+    const gpus = await probeLinux(noLspci, sysfs({ card0: { vendor: "0x1002", slot: "0000:03:00.0", total: 16 * GiB } }));
+    expect(gpus).toEqual([{ name: "AMD GPU (0000:03:00.0)", vramTotalBytes: 16 * GiB, source: "sysfs" }]);
   });
 });
 
@@ -133,6 +213,50 @@ describe("darwin", () => {
       parseSystemProfilerDisplays(JSON.stringify({ SPDisplaysDataType: [{ sppci_model: "AMD Radeon Pro 5500M", spdisplays_vram: "8 GB" }] })),
     ).toEqual([{ name: "AMD Radeon Pro 5500M", vramTotalBytes: 8 * GiB, source: "system_profiler" }]);
   });
+
+  const intel = {
+    "sysctl -n hw.memsize": { stdout: String(16 * GiB) },
+    "sysctl -n machdep.cpu.brand_string": { stdout: "Intel(R) Core(TM) i9-9980HK" },
+    "sysctl -n hw.optional.arm64": { stdout: "0" },
+    vm_stat: { stdout: vmStat },
+  };
+
+  it("uses system_profiler on Intel Macs and does not report unified memory", async () => {
+    const r = await probeDarwin(
+      runner({
+        ...intel,
+        system_profiler: {
+          stdout: JSON.stringify({ SPDisplaysDataType: [{ sppci_model: "AMD Radeon Pro 5500M", spdisplays_vram: "8 GB" }] }),
+        },
+      }),
+      16 * GiB,
+    );
+    expect(r.gpus).toEqual([{ name: "AMD Radeon Pro 5500M", vramTotalBytes: 8 * GiB, source: "system_profiler" }]);
+    expect(r.availableBytes).toBe(360000 * 16384);
+  });
+
+  it.each([
+    ["exits 1", { status: 1, stdout: "" }],
+    ["prints invalid JSON", { stdout: "not json" }],
+  ])("returns no GPUs when system_profiler %s", async (_label, sp) => {
+    const r = await probeDarwin(runner({ ...intel, system_profiler: sp }), 16 * GiB);
+    expect(r.gpus).toEqual([]);
+  });
+
+  it("omits free VRAM on Apple Silicon when vm_stat fails", async () => {
+    const r = await probeDarwin(
+      runner({
+        "sysctl -n hw.memsize": { stdout: String(16 * GiB) },
+        "sysctl -n hw.optional.arm64": { stdout: "1" },
+        vm_stat: { status: 1, stdout: "" },
+      }),
+      16 * GiB,
+    );
+    expect(r.availableBytes).toBeUndefined();
+    expect(r.gpus).toHaveLength(1);
+    expect(r.gpus[0]).toMatchObject({ unified: true, vramTotalBytes: Math.round(16 * GiB * 0.67) });
+    expect(r.gpus[0]).not.toHaveProperty("vramFreeBytes");
+  });
 });
 
 describe("createHardwareProbe", () => {
@@ -159,6 +283,23 @@ describe("createHardwareProbe", () => {
       freeEstimated: true,
     });
     expect(withEstimatedFree({ name: "igpu", vramTotalBytes: 128 * MiB, source: "registry" }).vramFreeBytes).toBeUndefined();
+  });
+
+  it("returns no GPUs on an unsupported platform", async () => {
+    let ran = false;
+    const probe = createHardwareProbe({
+      platform: "freebsd",
+      totalmem: () => 16 * GiB,
+      freemem: () => 8 * GiB,
+      cpuCount: () => 4,
+      run: async () => {
+        ran = true;
+        return { status: 0, stdout: "", stderr: "" };
+      },
+    });
+    const r = await probe.getSystemResources();
+    expect(r).toEqual({ platform: "freebsd", ramTotalBytes: 16 * GiB, ramFreeBytes: 8 * GiB, cpuCount: 4, gpus: [] });
+    expect(ran).toBe(false);
   });
 
   it("never throws when probes fail", async () => {

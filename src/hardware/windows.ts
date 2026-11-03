@@ -28,6 +28,9 @@ export function parseWindowsGpus(stdout: string): GpuInfo[] {
   for (const item of list) {
     const obj = item as { Name?: string; Bytes?: number; Source?: string };
     const name = obj.Name?.trim();
+    // Dedupe by name: Class\{...}\000N keys outlive removed adapters, and the
+    // output has no LUID to tell real cards apart. Identical non-NVIDIA cards
+    // therefore count once (nvidia-smi lists NVIDIA cards individually).
     if (!name || seen.has(name)) continue;
     // Virtual/remote adapters carry no usable memory.
     if (/basic (display|render)|remote display|virtual/i.test(name)) continue;
