@@ -3,6 +3,7 @@ import { Ajv, type ValidateFunction } from "ajv";
 import { z } from "zod";
 import { findCatalog, tasksForModel, type CatalogTask } from "../catalog/models.js";
 import { computeFit, parseParameterBillions } from "../fit.js";
+import type { SystemResources } from "../hardware/index.js";
 import type {
   ChatMessage,
   CompletionParams,
@@ -10,9 +11,10 @@ import type {
   LoadedModelInfo,
   ModelSummary,
   Provider,
+  RequestOptions,
 } from "../providers/types.js";
 import { rankSuggestions } from "./catalog.js";
-import { machineFingerprint, type SpeedRecord } from "../speed-cache.js";
+import { machineFingerprint, type SpeedCache, type SpeedRecord } from "../speed-cache.js";
 import type { ToolContext } from "./context.js";
 import { anyRecord, type Extra, ok, progressSender, providerArg, reqOpts, safe } from "./helpers.js";
 import { ensureModel } from "./lifecycle.js";
@@ -288,6 +290,138 @@ export function rankingReason(chosen: Candidate, ranked: Candidate[]): string {
   return "largest size tier among equally suited and ready models";
 }
 
+export interface CandidateQuery {
+  task: DelegateTask;
+  maxSizeBytes?: number;
+  contextLength?: number;
+  resources: SystemResources;
+  speedOf: ReturnType<SpeedCache["lookup"]>;
+}
+
+/**
+ * Every installed or loaded model on `pool` that can do `task` and fits this
+ * machine, as unranked candidates. `tooBig` counts models skipped only
+ * because they do not fit in memory, for the error message.
+ */
+export async function buildCandidates(
+  ctx: ToolContext,
+  pool: Provider[],
+  q: CandidateQuery,
+  opts: RequestOptions,
+): Promise<{ candidates: Candidate[]; tooBig: number }> {
+  const tag = TASK_TAG[q.task];
+  const candidates: Candidate[] = [];
+  let tooBig = 0;
+  await Promise.all(
+    pool.map(async (p) => {
+      const [models, loaded] = await Promise.all([
+        ctx.manager.listModelsCached(p, opts).catch(() => [] as ModelSummary[]),
+        p.listLoaded(opts).catch(() => [] as LoadedModelInfo[]),
+      ]);
+      const listedById = new Map(models.map((m) => [m.id, m]));
+      const loadedIds = new Set(loaded.map((m) => m.id));
+      const seen = new Set<string>();
+      const entries: Array<{ id: string; sizeBytes?: number }> = [
+        ...loaded.map((l) => ({ id: l.id, sizeBytes: l.sizeBytes })),
+        ...models,
+      ];
+      for (const m of entries) {
+        if (seen.has(m.id)) continue;
+        seen.add(m.id);
+        const listed = listedById.get(m.id);
+        const tasks = tasksForModel(m.id, listed?.family);
+        if (tasks.includes("embed")) continue;
+        const specialist = tasks.includes(tag) && tag !== "chat" && tag !== "general";
+        const usable = tasks.includes(tag) || GENERAL_OK.has(q.task);
+        if (!usable || (q.task === "vision" && !tasks.includes("vision"))) continue;
+        const catalog = findCatalog(m.id);
+        const sizeBytes = listed?.sizeBytes ?? m.sizeBytes ?? catalog?.approxSizeBytes;
+        if (q.maxSizeBytes && sizeBytes && sizeBytes > q.maxSizeBytes) continue;
+        const parameterSize = listed?.parameterSize ?? catalog?.parameterSize;
+        const isLoaded = loadedIds.has(m.id);
+        let fitTarget: string | undefined;
+        if (!isLoaded && sizeBytes && p.kind === "local") {
+          const fit = computeFit(q.resources, sizeBytes, { contextLength: q.contextLength, parameterSize });
+          fitTarget = fit.target;
+          if (fit.target === "none") {
+            tooBig += 1;
+            continue;
+          }
+        }
+        candidates.push({
+          provider: p,
+          model: m.id,
+          tier: isLoaded ? "loaded" : "installed",
+          specialist,
+          sizeBytes,
+          parameterBillions: parseParameterBillions(parameterSize),
+          fitTarget,
+          speed:
+            p.kind === "local"
+              ? q.speedOf(p.host, m.id, { quantization: listed?.quantization, sizeBytes: listed?.sizeBytes })
+              : undefined,
+        });
+      }
+    }),
+  );
+  return { candidates, tooBig };
+}
+
+/**
+ * allowPull: download and ready the best catalog model for the task, or
+ * undefined when nothing would improve on `best`. The catalog lists Ollama
+ * library tags, so only an Ollama provider can pull them.
+ */
+async function pullFallback(
+  ctx: ToolContext,
+  pool: Provider[],
+  q: Omit<CandidateQuery, "speedOf"> & { best?: Candidate },
+  extra: Extra,
+): Promise<Candidate | undefined> {
+  const tag = TASK_TAG[q.task];
+  const puller = pool.find((p) => p.type === "ollama" && p.capabilities().pull);
+  if (!puller) return undefined;
+  const fits = rankSuggestions(q.resources, tag, { contextLength: q.contextLength }).filter(
+    (s) => !q.maxSizeBytes || s.approxSizeBytes <= q.maxSizeBytes,
+  );
+  // Largest model that fits the GPU; with no usable GPU, the smallest that fits in RAM.
+  const pick =
+    fits.find((s) => s.target === "gpu" || s.target === "partial") ?? [...fits].reverse().find((s) => s.target === "cpu");
+  if (!pick) return undefined;
+  // A CPU-only download is no better than a CPU-only installed model.
+  if (q.best && isLocal(q.best) && pick.target === "cpu") return undefined;
+  const ready = await ensureModel(
+    ctx,
+    { model: pick.name, provider: puller.name, allowPull: true, contextLength: q.contextLength },
+    extra,
+  );
+  if (!ready.ready) throw new Error(`Pulled ${pick.name} on ${puller.name}, but it did not become ready.`);
+  return {
+    provider: puller,
+    model: pick.name,
+    tier: "pull",
+    specialist: pick.tasks.includes(tag),
+    sizeBytes: pick.approxSizeBytes,
+    fitTarget: pick.target,
+  };
+}
+
+/** The routing explanation for the chosen candidate. */
+export function explainChoice(chosen: Candidate, ranked: Candidate[], tag: CatalogTask): string {
+  return [
+    chosen.tier === "loaded"
+      ? "already loaded (no load cost)"
+      : chosen.tier === "pull"
+        ? "downloaded: nothing suitable was installed"
+        : "installed",
+    chosen.specialist ? `${tag} specialist` : "general model",
+    chosen.fitTarget ? `fits: ${chosen.fitTarget}` : undefined,
+    rankingReason(chosen, ranked),
+  ]
+    .filter(Boolean)
+    .join("; ");
+}
+
 export function register(server: McpServer, ctx: ToolContext): void {
   const { manager, config, hardware } = ctx;
 
@@ -377,7 +511,6 @@ export function register(server: McpServer, ctx: ToolContext): void {
       requireInput(gen as GenerationArgs);
       const detectOpts = reqOpts(config.detectTimeoutMs, extra);
       const opts = reqOpts(config.requestTimeoutMs, extra);
-      const tag = TASK_TAG[task];
       const hostedOk = allowHosted ?? config.allowHostedFallback;
       let pool = await manager.pool(detectOpts, { capability: "complete", hosted: hostedOk });
       if (provider) {
@@ -396,83 +529,18 @@ export function register(server: McpServer, ctx: ToolContext): void {
       const resources = await hardware.getSystemResources();
       const contextLength = gen.contextLength;
       const speedOf = ctx.speeds.lookup(machineFingerprint(resources));
+      const { candidates, tooBig } = await buildCandidates(ctx, pool, { task, maxSizeBytes, contextLength, resources, speedOf }, opts);
 
-      const cands: Candidate[] = [];
-      let tooBig = 0;
-      await Promise.all(
-        pool.map(async (p) => {
-          const [models, loaded] = await Promise.all([
-            manager.listModelsCached(p, opts).catch(() => [] as ModelSummary[]),
-            p.listLoaded(opts).catch(() => [] as LoadedModelInfo[]),
-          ]);
-          const loadedIds = new Set(loaded.map((m) => m.id));
-          const seen = new Set<string>();
-          for (const m of [...loaded.map((l) => ({ id: l.id, sizeBytes: l.sizeBytes })), ...models]) {
-            if (seen.has(m.id)) continue;
-            seen.add(m.id);
-            const listed = models.find((x) => x.id === m.id);
-            const tasks = tasksForModel(m.id, listed?.family);
-            if (tasks.includes("embed")) continue;
-            const specialist = tasks.includes(tag) && tag !== "chat" && tag !== "general";
-            const usable = tasks.includes(tag) || GENERAL_OK.has(task);
-            if (!usable || (task === "vision" && !tasks.includes("vision"))) continue;
-            const sizeBytes = listed?.sizeBytes ?? (m as { sizeBytes?: number }).sizeBytes ?? findCatalog(m.id)?.approxSizeBytes;
-            if (maxSizeBytes && sizeBytes && sizeBytes > maxSizeBytes) continue;
-            const isLoaded = loadedIds.has(m.id);
-            let fitTarget: string | undefined;
-            if (!isLoaded && sizeBytes && p.kind === "local") {
-              const fit = computeFit(resources, sizeBytes, {
-                contextLength,
-                parameterSize: listed?.parameterSize ?? findCatalog(m.id)?.parameterSize,
-              });
-              fitTarget = fit.target;
-              if (fit.target === "none") {
-                tooBig += 1;
-                continue;
-              }
-            }
-            cands.push({
-              provider: p,
-              model: m.id,
-              tier: isLoaded ? "loaded" : "installed",
-              specialist,
-              sizeBytes,
-              parameterBillions: parseParameterBillions(listed?.parameterSize ?? findCatalog(m.id)?.parameterSize),
-              fitTarget,
-              speed:
-                p.kind === "local"
-                  ? speedOf(p.host, m.id, { quantization: listed?.quantization, sizeBytes: listed?.sizeBytes })
-                  : undefined,
-            });
-          }
-        }),
-      );
-
-      let ranked = rankCandidates(cands);
+      let ranked = rankCandidates(candidates);
       let pulled = false;
       // Pull when nothing usable is installed, or when the best option is only
       // CPU placement or a hosted provider and a download would do better.
       const best = ranked[0];
       if (allowPull && (!best || !isLocal(best) || onCpu(best))) {
-        const puller = pool.find((p) => p.type === "ollama" && p.capabilities().pull);
-        const fits = puller
-          ? rankSuggestions(resources, tag, { contextLength }).filter(
-              (s) => !maxSizeBytes || s.approxSizeBytes <= maxSizeBytes,
-            )
-          : [];
-        // Largest model that fits the GPU; with no usable GPU, the smallest that fits in RAM.
-        const pick =
-          fits.find((s) => s.target === "gpu" || s.target === "partial") ??
-          [...fits].reverse().find((s) => s.target === "cpu");
-        const improves = !best || !isLocal(best) || pick?.target !== "cpu";
-        if (puller && pick && improves) {
-          const ready = await ensureModel(ctx, { model: pick.name, provider: puller.name, allowPull: true, contextLength }, extra);
-          if (!ready.ready) throw new Error(`Pulled ${pick.name} on ${puller.name}, but it did not become ready.`);
+        const pick = await pullFallback(ctx, pool, { task, maxSizeBytes, contextLength, resources, best }, extra);
+        if (pick) {
           pulled = true;
-          ranked = [
-            { provider: puller, model: pick.name, tier: "pull", specialist: pick.tasks.includes(tag), sizeBytes: pick.approxSizeBytes, fitTarget: pick.target },
-            ...ranked,
-          ];
+          ranked = [pick, ...ranked];
         }
       }
       const chosen = ranked[0];
@@ -483,14 +551,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
             `Install a smaller one (see suggest_model), or pass allowPull:true.`,
         );
       }
-      const why = [
-        chosen.tier === "loaded" ? "already loaded (no load cost)" : chosen.tier === "pull" ? "downloaded: nothing suitable was installed" : "installed",
-        chosen.specialist ? `${tag} specialist` : "general model",
-        chosen.fitTarget ? `fits: ${chosen.fitTarget}` : undefined,
-        rankingReason(chosen, ranked),
-      ]
-        .filter(Boolean)
-        .join("; ");
+      const why = explainChoice(chosen, ranked, TASK_TAG[task]);
       const result = await runCompletion(ctx, chosen.provider, chosen.model, gen as GenerationArgs, extra);
       return ok({
         ...result,
