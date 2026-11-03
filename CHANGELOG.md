@@ -7,10 +7,48 @@ tags that version and publishes it.
 
 ## [Unreleased]
 
+### Added
+
+- `delegate { fallback: true }` tries the next ranked candidate (up to 3)
+  when the chosen model fails before producing output; failed attempts are
+  listed in `routing.attempts`.
+- `repairAttempts` on `complete` and `delegate`: when `json_schema` output
+  fails validation, the same model is asked to correct it.
+- Background pulls: `pull_model { background: true }` returns a job id;
+  `pull_status` and `pull_cancel` check on or stop it.
+- `diagnostics` tool: effective config (keys redacted), per-provider
+  detection with latency and errors, speed cache and hardware probe sources.
+
 ### Changed
 
 - Node.js 22 is now the minimum supported runtime (`engines.node >= 22`).
   Node 20 reached end of life in April 2026; the Node 20 CI smoke job is gone.
+- `delegate` keeps hosted providers strictly behind local ones, even with
+  `LOCAL_AI_ALLOW_HOSTED_FALLBACK`; `allowHosted: false` now overrides the
+  env flag.
+- `delegate` runs installed models on CPU when nothing fits the GPU (they
+  rank after GPU-fitting models), so it works on machines without a GPU.
+- GPU probe results are cached for 5 s (invalidated by load/unload), and the
+  Windows probes run in parallel.
+- `publish.yml` builds and tests in a job without the OIDC token; only a
+  separate publish job, bound to the `release` environment, can publish.
+
+### Fixed
+
+- `OLLAMA_HOST=0.0.0.0` (or any host without a port) now resolves to the
+  runtime's default port on loopback instead of port 80.
+- Errors sent mid-stream by OpenAI-compatible runtimes are reported instead
+  of returning partial text as success.
+- Benchmarks recorded under a short name (`qwen3`) are now used by
+  `delegate` for the listed id (`qwen3:latest`).
+- `json_schema` validation no longer fails on a reused `$id` or grows
+  memory with every call.
+- LM Studio lifecycle tools work as the first call after startup, and a
+  timed-out `lms` check is no longer cached.
+- `delegate { allowPull }` respects `maxSizeBytes`, and naming a provider
+  that cannot be used gives a specific error.
+- `ensure_model` reports `ready: false` when the runtime does not list the
+  model after loading it, and `verified: false` when it cannot check.
 
 ## [0.6.1] - 2026-11-03
 
