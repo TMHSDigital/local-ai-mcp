@@ -31,12 +31,30 @@ export interface Config {
   benchmarkCachePath?: string;
 }
 
-export function normalizeHost(value: string): string {
+/**
+ * Normalize a host setting into a base URL. A bare `host` or `host:port` gets
+ * `http://`; when it has no port, `defaultPort` is added (the runtime's own
+ * client does the same, e.g. `OLLAMA_HOST=0.0.0.0` means port 11434). The
+ * unspecified bind addresses `0.0.0.0` and `::` are rewritten to loopback,
+ * since they are valid for listening but not for connecting.
+ */
+export function normalizeHost(value: string, defaultPort?: number): string {
   let host = value.trim();
-  if (!/^https?:\/\//i.test(host)) {
-    host = `http://${host}`;
+  const hadScheme = /^https?:\/\//i.test(host);
+  if (!hadScheme) host = `http://${host}`;
+  host = host.replace(/\/+$/, "");
+  let url: URL;
+  try {
+    url = new URL(host);
+  } catch {
+    return host;
   }
-  return host.replace(/\/+$/, "");
+  const bind = url.hostname === "0.0.0.0" ? "127.0.0.1" : url.hostname === "[::]" ? "[::1]" : undefined;
+  const addPort = !hadScheme && !url.port && defaultPort !== undefined;
+  if (!bind && !addPort) return host;
+  if (bind) url.hostname = bind;
+  if (addPort) url.port = String(defaultPort);
+  return url.toString().replace(/\/+$/, "");
 }
 
 function parseIntEnv(value: string | undefined, fallback: number): number {
@@ -140,10 +158,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const add = (p: ProviderInstanceConfig) => {
     if (!disabled.has(p.type) && !disabled.has(p.name)) providers.push(p);
   };
-  const optionalHost = (v: string | undefined) => (v?.trim() ? normalizeHost(v) : undefined);
+  const optionalHost = (v: string | undefined, defaultPort?: number) =>
+    v?.trim() ? normalizeHost(v, defaultPort) : undefined;
   // Blank values (e.g. `OLLAMA_HOST=` in a .env file or an empty bundle
-  // setting) mean "use the default", not an empty host.
-  const hostOr = (v: string | undefined, fallback: string) => optionalHost(v) ?? fallback;
+  // setting) mean "use the default", not an empty host. A host without a port
+  // gets the runtime's default port.
+  const hostOr = (v: string | undefined, fallback: string) =>
+    optionalHost(v, Number(new URL(fallback).port) || undefined) ?? fallback;
 
   // Always-on local runtimes with well-known, distinct default ports.
   add({ type: "ollama", name: "ollama", host: hostOr(env.OLLAMA_HOST, "http://localhost:11434") });

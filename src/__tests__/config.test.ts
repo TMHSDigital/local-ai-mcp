@@ -32,6 +32,22 @@ describe("loadConfig", () => {
     expect(normalizeHost("https://x.test///")).toBe("https://x.test");
   });
 
+  it("adds the runtime's default port to a bare host and rewrites bind addresses", () => {
+    expect(normalizeHost("0.0.0.0", 11434)).toBe("http://127.0.0.1:11434");
+    expect(normalizeHost("127.0.0.1", 11434)).toBe("http://127.0.0.1:11434");
+    expect(normalizeHost("0.0.0.0:9000", 11434)).toBe("http://127.0.0.1:9000");
+    expect(normalizeHost("http://[::]:11434")).toBe("http://[::1]:11434");
+    // An explicit scheme keeps its own default port, as Ollama's client does.
+    expect(normalizeHost("http://myhost", 11434)).toBe("http://myhost");
+    expect(normalizeHost("https://x.test/v1", 11434)).toBe("https://x.test/v1");
+  });
+
+  it("resolves OLLAMA_HOST=0.0.0.0 to the loopback default port", () => {
+    const c = loadConfig({ OLLAMA_HOST: "0.0.0.0", LMSTUDIO_HOST: "box" });
+    expect(c.providers.find((p) => p.name === "ollama")?.host).toBe("http://127.0.0.1:11434");
+    expect(c.providers.find((p) => p.name === "lmstudio")?.host).toBe("http://box:1234");
+  });
+
   it("registers moonshot only when a key is set, as hosted", () => {
     expect(loadConfig({}).providers.some((p) => p.type === "moonshot")).toBe(false);
     const m = loadConfig({ MOONSHOT_API_KEY: " k " }).providers.find((p) => p.type === "moonshot");
