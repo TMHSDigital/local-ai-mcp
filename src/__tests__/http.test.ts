@@ -69,6 +69,16 @@ describe("httpSse", () => {
     expect(seen).toEqual(['{"a":1}', '{"a":2}']);
   });
 
+  it("throws on `event: error` frames and bare `error:` lines", async () => {
+    mockFetch(() => ({ chunks: ['data: {"a":1}\n\nevent: error\ndata: {"error":"boom"}\n\n'] }));
+    const seen: string[] = [];
+    await expect(httpSse("http://x/s", {}, (d) => void seen.push(d))).rejects.toThrow(/boom/);
+    expect(seen).toEqual(['{"a":1}']);
+
+    mockFetch(() => ({ chunks: ['error: {"message":"slot unavailable"}\n\n'] }));
+    await expect(httpSse("http://x/s", {}, () => undefined)).rejects.toThrow(/slot unavailable/);
+  });
+
   it("keeps a slow-but-steady stream alive past the idle timeout but kills a stalled one", async () => {
     mockFetch(() => ({ chunks: ["data: 1\n", "data: 2\n", "data: 3\n", "data: 4\n"], chunkDelayMs: 30 }));
     const seen: string[] = [];

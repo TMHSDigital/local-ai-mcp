@@ -58,6 +58,18 @@ describe("openAiChatComplete", () => {
     expect(r.timings?.ttftMs).toBeTypeOf("number");
   });
 
+  it("rejects when the server sends an error frame mid-stream", async () => {
+    mockFetch(() => ({
+      chunks: [
+        'data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n',
+        'data: {"error":{"message":"context overflow"}}\n\n',
+      ],
+    }));
+    await expect(
+      openAiChatComplete(TARGET, { model: "m", prompt: "x" }, { ...OPTS, onChunk: () => undefined }),
+    ).rejects.toThrow(/context overflow/);
+  });
+
   it("retries without stream_options when the server rejects it", async () => {
     let n = 0;
     const calls = mockFetch(() => {

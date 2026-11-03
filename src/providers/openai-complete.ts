@@ -1,4 +1,4 @@
-import { HttpError, httpJson, httpSse } from "../http.js";
+import { HttpError, httpJson, httpSse, streamErrorMessage } from "../http.js";
 import type {
   ChatMessage,
   CompletionChunkHandler,
@@ -197,6 +197,10 @@ export async function openAiChatComplete(
         } catch {
           return;
         }
+        // Servers that fail after sending headers put the error in a data
+        // frame; returning the partial text as success would hide it.
+        const failure = streamErrorMessage(parsed);
+        if (failure) throw new Error(failure);
         const delta = parsed.choices?.[0]?.delta?.content ?? "";
         if (delta) {
           if (timings.ttftMs === undefined) timings.ttftMs = Date.now() - start;

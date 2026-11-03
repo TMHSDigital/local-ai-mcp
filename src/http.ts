@@ -191,13 +191,59 @@ export async function httpSse(
   opts: HttpOptions,
   onEvent: (data: string) => void | Promise<void>,
 ): Promise<void> {
+  let event = "";
   await httpStreamLines(url, opts, "text/event-stream", async (line) => {
+    // A blank line ends an SSE event; the event type resets with it.
+    if (line.trim() === "") {
+      event = "";
+      return;
+    }
+    if (line.startsWith("event:")) {
+      event = line.slice(6).trim();
+      return;
+    }
+    // llama.cpp reports failures after the headers as a bare `error:` line.
+    if (line.startsWith("error:")) {
+      throw new Error(streamErrorMessage(line.slice(6).trim(), true) ?? "stream error");
+    }
     if (!line.startsWith("data:")) return;
     const data = line.slice(5).trimStart();
+    if (event === "error") {
+      throw new Error(streamErrorMessage(data, true) ?? (data || "stream error"));
+    }
     if (data === "[DONE]") return false;
     if (data === "") return;
     await onEvent(data);
   });
+}
+
+/**
+ * The message from an error payload sent inside a stream, or undefined when
+ * `payload` is not one. Accepts `{"error":"msg"}`, `{"error":{"message":"msg"}}`
+ * (OpenAI / vLLM style), `{"object":"error","message":"msg"}`, or plain text.
+ * When `known` is true the payload is already known to be an error, so a bare
+ * `{"message":"msg"}` counts too.
+ */
+export function streamErrorMessage(payload: unknown, known = false): string | undefined {
+  let obj = payload;
+  if (typeof payload === "string") {
+    try {
+      obj = JSON.parse(payload);
+    } catch {
+      return payload.trim() || undefined;
+    }
+  }
+  if (!obj || typeof obj !== "object") return undefined;
+  const o = obj as { error?: unknown; object?: unknown; message?: unknown };
+  if (typeof o.error === "string" && o.error) return o.error;
+  if (o.error && typeof o.error === "object") {
+    const m = (o.error as { message?: unknown }).message;
+    return typeof m === "string" && m ? m : JSON.stringify(o.error);
+  }
+  if (o.object === "error" || known) {
+    return typeof o.message === "string" && o.message ? o.message : known ? undefined : "stream error";
+  }
+  return undefined;
 }
 
 /** Stream newline-delimited JSON (Ollama's native streaming format). */
